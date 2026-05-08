@@ -1,0 +1,250 @@
+﻿@page "/bulk-payment"
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<ApartmentContext> AptCtxFactory
+@inject IDbContextFactory<FlatContext> FlatCtxFactory
+@inject IDbContextFactory<PaymentContext> PayCtxFactory
+@inject IDbContextFactory<UserContext> UserCtxFactory
+
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-9">
+            <div class="card shadow border-0">
+                <div class="card-header bg-primary text-white py-3">
+                    <h5 class="mb-0"><i class="bi bi-cash-stack me-2"></i>Ödeme Ekle</h5>
+                </div>
+                <div class="card-body p-4">
+                    <div class="row g-3">
+                       
+                        <div class="col-md-12">
+                            <label class="form-label fw-bold">1. Apartman Seçin</label>
+                            <select @onchange="OnApartmentChanged" class="form-select shadow-sm" value="@selectedApartmentId">
+                                @if (apartments.Count != 1)
+                                {
+                                    <option value="0">-- Apartman Seçiniz --</option>
+                                }
+                                @foreach (var apt in apartments)
+                                {
+                                    <option value="@apt.Id">@apt.Name</option>
+                                }
+                            </select>
+                        </div>
+
+                        @if (selectedApartmentId > 0)
+                        {
+                           
+                            <div class="col-md-12 animate__animated animate__fadeIn">
+                                <label class="form-label fw-bold">2. Daire(leri) Seçin</label>
+                                <div class="border rounded p-3 bg-light" style="max-height: 200px; overflow-y: auto;">
+                                    <div class="form-check mb-2 pb-2 border-bottom">
+                                        <input class="form-check-input" type="checkbox" id="selectAll" @onchange="ToggleSelectAll" checked="@isAllSelected">
+                                        <label class="form-check-label fw-bold" for="selectAll">
+                                            Tüm Daireleri Seç (@availableFlats.Count Dolu Daire)
+                                        </label>
+                                    </div>
+                                    <div class="row">
+                                        @foreach (var flat in availableFlats)
+                                        {
+                                            var resident = users.FirstOrDefault(u => u.Id == flat.ResidentUserId);
+                                            <div class="col-md-6">
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox"
+                                                           value="@flat.Id"
+                                                           id="flat_@flat.Id"
+                                                           checked="@selectedFlatIds.Contains(flat.Id)"
+                                                           @onchange="(e) => OnFlatToggled(flat.Id, e.Value)">
+                                                    <label class="form-check-label small" for="flat_@flat.Id">
+                                                        No: @flat.FlatNumber (@(resident?.FirstName) @(resident?.LastName))
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+
+                           
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">İşlem Türü</label>
+                                <select @bind="paymentCategory" class="form-select shadow-sm">
+                                    <option value="Aidat">Aidat</option>
+                                    <option value="Ortak Gider">Ortak Gider</option>
+                                    <option value="Demirbaş">Demirbaş</option>
+                                    <option value="Diğer">Diğer</option>
+                                </select>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Tutar (TL)</label>
+                                <div class="input-group">
+                                    <input type="number" @bind="amount" class="form-control shadow-sm" placeholder="0.00" />
+                                    <span class="input-group-text">₺</span>
+                                </div>
+                            </div>
+
+                            <div class="col-md-12">
+                                <label class="form-label fw-bold">Açıklama</label>
+                                <input type="text" @bind="description" class="form-control shadow-sm" placeholder="Örn: Haziran 2026 Aidat Ödemesi" />
+                            </div>
+
+                            <div class="col-md-12">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <label class="form-label fw-bold mb-0">Son Ödeme Tarihi</label>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="noDueDate" @bind="noDueDate">
+                                        <label class="form-check-label small text-muted" for="noDueDate">
+                                            Son ödeme tarihi belirlemek istemiyorum
+                                        </label>
+                                    </div>
+                                </div>
+                                
+                                <input type="datetime-local" @bind="dueDate" class="form-control shadow-sm" disabled="@noDueDate" />
+                            </div>
+
+                            <div class="col-12 mt-4">
+                                <button class="btn btn-primary w-100 py-2 fw-bold shadow" @onclick="ProcessPayment" disabled="@(isProcessing || !selectedFlatIds.Any())">
+                                    @if (isProcessing)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-2"></span>
+                                        <span>İşleniyor...</span>
+                                    }
+                                    else
+                                    {
+                                        <i class="bi bi-plus-circle me-2"></i>
+                                        <span>Ödemeyi Ekle (@selectedFlatIds.Count Daire Seçili)</span>
+                                    }
+                                </button>
+                            </div>
+                        }
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(statusMessage))
+                    {
+                        <div class="alert @statusClass mt-3">
+                            @statusMessage
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<Apartment> apartments = new();
+    private List<Flat> availableFlats = new();
+    private List<User> users = new();
+    private List<int> selectedFlatIds = new();
+
+    private int selectedApartmentId;
+    private decimal amount;
+    private string paymentCategory = "Aidat";
+    private string description = "";
+
+   
+    private DateTime dueDate = DateTime.Now.AddDays(7).Date.AddHours(23).AddMinutes(59);
+    private bool noDueDate = false;
+
+    private bool isProcessing = false;
+    private bool isAllSelected = false;
+    private string statusMessage = "";
+    private string statusClass = "alert-info";
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var aptCtx = await AptCtxFactory.CreateDbContextAsync();
+        apartments = await aptCtx.Apartments.AsNoTracking().ToListAsync();
+
+        if (apartments.Count == 1)
+        {
+            selectedApartmentId = apartments[0].Id;
+            await LoadFlatsForApartment(selectedApartmentId);
+        }
+    }
+
+    private async Task OnApartmentChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int id))
+        {
+            selectedApartmentId = id;
+            await LoadFlatsForApartment(id);
+        }
+    }
+
+    private async Task LoadFlatsForApartment(int apartmentId)
+    {
+        selectedFlatIds.Clear();
+        isAllSelected = false;
+        availableFlats.Clear();
+
+        if (apartmentId > 0)
+        {
+            using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+            using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+
+            availableFlats = await flatCtx.Flats
+                .Where(f => f.ApartmentId == apartmentId && f.ResidentUserId != null)
+                .OrderBy(f => f.FlatNumber)
+                .ToListAsync();
+
+            var residentIds = availableFlats.Select(f => f.ResidentUserId).ToList();
+            users = await userCtx.Users
+                .Where(u => residentIds.Contains(u.Id))
+                .ToListAsync();
+        }
+        StateHasChanged();
+    }
+
+    private void OnFlatToggled(int flatId, object? checkedValue)
+    {
+        bool isChecked = (bool)(checkedValue ?? false);
+        if (isChecked)
+            selectedFlatIds.Add(flatId);
+        else
+            selectedFlatIds.Remove(flatId);
+
+        isAllSelected = selectedFlatIds.Count == availableFlats.Count;
+    }
+
+    private void ToggleSelectAll(ChangeEventArgs e)
+    {
+        isAllSelected = (bool)(e.Value ?? false);
+        selectedFlatIds = isAllSelected ? availableFlats.Select(f => f.Id).ToList() : new List<int>();
+    }
+
+    private async Task ProcessPayment()
+    {
+        if (amount <= 0 || !selectedFlatIds.Any()) return;
+
+        isProcessing = true;
+        try
+        {
+            using var payCtx = await PayCtxFactory.CreateDbContextAsync();
+            foreach (var flatId in selectedFlatIds)
+            {
+                payCtx.Payments.Add(new Payment
+                {
+                    FlatId = flatId,
+                    ApartmentId = selectedApartmentId,
+                    Amount = amount,
+                    Category = paymentCategory,
+                    Description = description,
+                    
+                    DueDate = noDueDate ? DateTime.MaxValue : dueDate,
+                    CreatedDate = DateTime.Now,
+                    IsPaid = false
+                });
+            }
+            await payCtx.SaveChangesAsync();
+            statusClass = "alert-success";
+            statusMessage = "Ödeme(ler) başarıyla kaydedildi.";
+            amount = 0; description = ""; selectedFlatIds.Clear();
+            isAllSelected = false;
+        }
+        catch (Exception ex) { statusClass = "alert-danger"; statusMessage = ex.Message; }
+        finally { isProcessing = false; }
+    }
+}

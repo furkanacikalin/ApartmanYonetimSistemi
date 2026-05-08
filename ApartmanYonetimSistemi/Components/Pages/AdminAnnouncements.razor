@@ -1,0 +1,209 @@
+﻿@page "/admin/announcements"
+@attribute [Authorize(Roles = "Admin")]
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<AnnouncementContext> AnnCtxFactory
+@inject IDbContextFactory<UserContext> UserCtxFactory
+@inject IDbContextFactory<ApartmentContext> AptCtxFactory
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3 class="fw-bold"><i class="bi bi-megaphone text-primary me-2"></i>Duyuru Yönetimi</h3>
+        <button class="btn btn-primary shadow-sm" @onclick="PrepareNewAnnouncement">
+            <i class="bi bi-plus-circle"></i> Yeni Duyuru Ekle
+        </button>
+    </div>
+
+    @if (showForm)
+    {
+        <div class="card shadow-sm mb-4 border-0 border-top border-primary border-4">
+            <div class="card-header bg-white fw-bold py-3">
+                @(editingId == 0 ? "Yeni Duyuru Yayınla" : "Duyuruyu Güncelle")
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Başlık</label>
+                    <input @bind="currentAnn.Title" class="form-control" placeholder="Duyuru başlığını girin..." />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">İçerik</label>
+                    <textarea @bind="currentAnn.Content" class="form-control" rows="4" placeholder="Duyuru detaylarını yazın..."></textarea>
+                </div>
+                <div class="d-flex gap-2 justify-content-end">
+                    <button class="btn btn-light border" @onclick="() => showForm = false">İptal</button>
+                    <button class="btn btn-success px-4" @onclick="SaveAnnouncement">
+                        <i class="bi bi-check-lg"></i> Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="table-responsive">
+        <table class="table table-hover align-middle bg-white shadow-sm rounded overflow-hidden">
+            <thead class="table-dark">
+                <tr>
+                    <th style="width: 25%">Tarih / Durum</th>
+                    <th style="width: 25%">Başlık</th>
+                    <th style="width: 35%">İçerik</th>
+                    <th style="width: 15%" class="text-end">İşlemler</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (announcements == null || !announcements.Any())
+                {
+                    <tr>
+                        <td colspan="4" class="text-center py-4 text-muted">Henüz yayınlanmış bir duyuru bulunmuyor.</td>
+                    </tr>
+                }
+                else
+                {
+                    @foreach (var ann in announcements)
+                    {
+                        <tr>
+                            <td>
+                                <div class="d-flex flex-column">
+                                    @if (ann.UpdatedDate.HasValue)
+                                    {
+                                        <div class="d-flex align-items-center">
+                                            <span class="text-muted small">
+                                                <i class="bi bi-clock-history me-1"></i>
+                                                @ann.UpdatedDate.Value.ToString("dd.MM.yyyy HH:mm")
+                                            </span>
+                                            <span class="badge rounded-pill bg-info text-dark ms-2" style="font-size: 0.65rem;">
+                                                Güncellendi
+                                            </span>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small">
+                                            <i class="bi bi-clock me-1"></i>
+                                            @ann.CreatedDate.ToString("dd.MM.yyyy HH:mm")
+                                        </span>
+                                    }
+                                </div>
+                            </td>
+                            <td class="fw-bold">@ann.Title</td>
+                            <td class="text-truncate" style="max-width: 250px;">@ann.Content</td>
+                            <td class="text-end">
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-primary" @onclick="() => EditAnnouncement(ann)" title="Düzenle">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-outline-danger" @onclick="() => DeleteAnnouncement(ann.Id)" title="Sil">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    private List<Announcement> announcements = new();
+    private Announcement currentAnn = new();
+    private bool showForm = false;
+    private int editingId = 0;
+    private int currentApartmentId;
+
+    [CascadingParameter] private Task<AuthenticationState> authState { get; set; } = null!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await authState;
+        var userIdClaim = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        if (int.TryParse(userIdClaim, out int userId))
+        {
+            
+            using var aptCtx = await AptCtxFactory.CreateDbContextAsync();
+            var apt = await aptCtx.Apartments.FirstOrDefaultAsync(a => a.AdminUserId == userId);
+
+            if (apt != null)
+            {
+                currentApartmentId = apt.Id;
+                await LoadAnnouncements();
+            }
+        }
+    }
+
+    private async Task LoadAnnouncements()
+    {
+        
+        using var annCtx = await AnnCtxFactory.CreateDbContextAsync();
+
+        announcements = await annCtx.Announcements
+            .Where(a => a.ApartmentId == currentApartmentId)
+            .OrderByDescending(a => a.UpdatedDate ?? a.CreatedDate)
+            .ToListAsync();
+    }
+
+    private void PrepareNewAnnouncement()
+    {
+        currentAnn = new Announcement { ApartmentId = currentApartmentId, CreatedDate = DateTime.Now };
+        editingId = 0;
+        showForm = true;
+    }
+
+    private void EditAnnouncement(Announcement ann)
+    {
+        currentAnn = new Announcement
+        {
+            Id = ann.Id,
+            Title = ann.Title,
+            Content = ann.Content,
+            ApartmentId = ann.ApartmentId,
+            CreatedDate = ann.CreatedDate,
+            UpdatedDate = ann.UpdatedDate
+        };
+        editingId = ann.Id;
+        showForm = true;
+    }
+
+    private async Task SaveAnnouncement()
+    {
+        if (string.IsNullOrWhiteSpace(currentAnn.Title) || string.IsNullOrWhiteSpace(currentAnn.Content)) return;
+
+        using var annCtx = await AnnCtxFactory.CreateDbContextAsync();
+
+        if (editingId == 0)
+        {
+            annCtx.Announcements.Add(currentAnn);
+        }
+        else
+        {
+            var existing = await annCtx.Announcements.FindAsync(editingId);
+            if (existing != null)
+            {
+                existing.Title = currentAnn.Title;
+                existing.Content = currentAnn.Content;
+                existing.UpdatedDate = DateTime.Now;
+            }
+        }
+
+        await annCtx.SaveChangesAsync();
+        showForm = false;
+        await LoadAnnouncements();
+    }
+
+    private async Task DeleteAnnouncement(int id)
+    {
+        using var annCtx = await AnnCtxFactory.CreateDbContextAsync();
+        var ann = await annCtx.Announcements.FindAsync(id);
+
+        if (ann != null)
+        {
+            annCtx.Announcements.Remove(ann);
+            await annCtx.SaveChangesAsync();
+            await LoadAnnouncements();
+        }
+    }
+}

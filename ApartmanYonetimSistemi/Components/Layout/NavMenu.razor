@@ -1,0 +1,171 @@
+﻿@using Microsoft.AspNetCore.Components.Authorization
+@using ApartmanYonetimSistemi.Data
+@using Microsoft.EntityFrameworkCore
+@implements IDisposable
+@inject ApartmentContext AptCtx
+@inject NavigationManager NavManager
+@inject AuthenticationStateProvider AuthStateProvider
+
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand fw-bold" href="">
+            <i class="bi bi-building-gear me-2"></i>AptYönetim
+        </a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="flex-column">
+
+        
+        <div class="nav-item px-3">
+            <NavLink class="nav-link d-flex align-items-center" href="" Match="NavLinkMatch.All" style="display: flex !important; align-items: center; gap: 12px;">
+                <i class="bi bi-house-door-fill" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                <span>Ana Sayfa</span>
+            </NavLink>
+        </div>
+
+        <AuthorizeView>
+            <Authorized>
+                
+                @if (context.User.IsInRole("Admin"))
+                {
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="dashboard" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-speedometer2" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Yönetici Paneli</span>
+                        </NavLink>
+                    </div>
+
+                    @if (!hasApartment)
+                    {
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="create-apartment" style="display: flex !important; align-items: center; gap: 12px;">
+                                <i class="bi bi-plus-square" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                                <span>Apartman Ekle</span>
+                            </NavLink>
+                        </div>
+                    }
+
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="admin/announcements" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-megaphone-fill" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Duyuru Yönetimi</span>
+                        </NavLink>
+                    </div>
+
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="admin-requests" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-clipboard-check-fill" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Gelen Talepler</span>
+                        </NavLink>
+                    </div>
+
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="bulk-payment" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-plus-circle-fill" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Ödeme Ekle</span>
+                        </NavLink>
+                    </div>
+
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="payment-tracking" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-list-check" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Ödeme Takibi</span>
+                        </NavLink>
+                    </div>
+                }
+
+                
+                @if (context.User.IsInRole("Resident"))
+                {
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="resident-dashboard" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-person-badge" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Dairem</span>
+                        </NavLink>
+                    </div>
+
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="announcements" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-megaphone-fill" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Duyurular</span>
+                        </NavLink>
+                    </div>
+
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="my-requests" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-chat-left-text-fill" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Taleplerim</span>
+                        </NavLink>
+                    </div>
+
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="my-payments" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-cash-stack" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Ödemelerim</span>
+                        </NavLink>
+                    </div>
+                }
+            </Authorized>
+        </AuthorizeView>
+
+    </nav>
+</div>
+
+@code {
+    private bool hasApartment = false;
+    [CascadingParameter] private Task<AuthenticationState> authState { get; set; } = null!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        AuthStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
+        NavManager.LocationChanged += HandleLocationChanged;
+        await CheckApartmentStatus();
+    }
+
+    private async void OnAuthenticationStateChanged(Task<AuthenticationState> task)
+    {
+        await InvokeAsync(async () =>
+        {
+            await CheckApartmentStatus();
+            StateHasChanged();
+        });
+    }
+
+    private async void HandleLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        await InvokeAsync(async () =>
+        {
+            await CheckApartmentStatus();
+            StateHasChanged();
+        });
+    }
+
+    private async Task CheckApartmentStatus()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+
+        if (user.Identity?.IsAuthenticated == true && user.IsInRole("Admin"))
+        {
+            var userIdClaim = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (int.TryParse(userIdClaim, out int userId))
+            {
+                hasApartment = await AptCtx.Apartments.AnyAsync(a => a.AdminUserId == userId);
+            }
+        }
+        else
+        {
+            hasApartment = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        AuthStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+        NavManager.LocationChanged -= HandleLocationChanged;
+    }
+}

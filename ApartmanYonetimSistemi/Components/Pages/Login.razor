@@ -1,0 +1,160 @@
+﻿@page "/login"
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using ApartmanYonetimSistemi.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<UserContext> UserCtxFactory
+@inject IDbContextFactory<ApartmentContext> AptCtxFactory
+@inject SecurityService Security
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager NavManager
+
+<div class="container d-flex justify-content-center align-items-center" style="min-height: 80vh;">
+    <div class="card shadow-lg p-4" style="width: 100%; max-width: 400px; border-radius: 15px;">
+        <div class="text-center mb-4">
+            <h2 class="fw-bold text-primary">Apartman Yönetimi</h2>
+            <p class="text-muted">Lütfen giriş yapınız</p>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-bold">Kullanıcı Adı</label>
+            <div class="input-group">
+                <span class="input-group-text bg-white"><i class="bi bi-person"></i></span>
+                <input @bind="loginModel.Username" class="form-control" placeholder="admin" />
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-bold">Şifre</label>
+            <div class="input-group">
+                <span class="input-group-text bg-white"><i class="bi bi-lock"></i></span>
+                <input @bind="loginModel.Password" type="password" class="form-control" placeholder="******" />
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="alert alert-danger py-2 small text-center">
+                @errorMessage
+            </div>
+        }
+
+        <button class="btn btn-primary w-100 btn-lg mb-3" @onclick="HandleLogin">Giriş Yap</button>
+
+        <div class="text-center">
+            <small class="text-muted">İlk giriş için: admin / 123456</small>
+        </div>
+    </div>
+</div>
+
+@code {
+    private LoginRequest loginModel = new();
+    private string? errorMessage;
+    [CascadingParameter] private Task<AuthenticationState> authState { get; set; } = null!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await authState;
+        if (auth.User.Identity?.IsAuthenticated == true)
+        {
+            await RedirectUserByRole(auth.User);
+        }
+    }
+
+    private async Task HandleLogin()
+    {
+        errorMessage = null;
+
+        if (string.IsNullOrWhiteSpace(loginModel.Username) || string.IsNullOrWhiteSpace(loginModel.Password))
+        {
+            errorMessage = "Kullanıcı adı ve şifre boş bırakılamaz.";
+            return;
+        }
+
+       
+        using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+        var user = await userCtx.Users.FirstOrDefaultAsync(u => u.Username == loginModel.Username);
+
+        if (user != null)
+        {
+            bool isPasswordValid = Security.VerifyPassword(loginModel.Password, user.PasswordHash, user.Salt);
+
+            if (isPasswordValid)
+            {
+                var userSession = new UserSession
+                {
+                    Id = user.Id,
+                    Username = user.Username,
+                    Role = user.Role
+                };
+
+                var customAuthStateProvider = (CustomAuthStateProvider)AuthStateProvider;
+                await customAuthStateProvider.UpdateAuthenticationState(userSession);
+
+                if (user.MustChangePassword)
+                {
+                    NavManager.NavigateTo($"/force-password-change/{user.Id}");
+                    return;
+                }
+
+                await RedirectUserByRole(null, user);
+            }
+            else
+            {
+                errorMessage = "Şifre hatalı!";
+            }
+        }
+        else
+        {
+            errorMessage = "Kullanıcı bulunamadı!";
+        }
+    }
+
+    private async Task RedirectUserByRole(System.Security.Claims.ClaimsPrincipal? principal, User? userModel = null)
+    {
+        string role = "";
+        int userId = 0;
+
+        if (principal != null)
+        {
+            role = principal.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? "";
+            int.TryParse(principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out userId);
+        }
+        else if (userModel != null)
+        {
+            role = userModel.Role;
+            userId = userModel.Id;
+        }
+
+        if (role == "Admin")
+        {
+            
+            using var aptCtx = await AptCtxFactory.CreateDbContextAsync();
+            var hasApartment = await aptCtx.Apartments.AnyAsync(a => a.AdminUserId == userId);
+
+            if (!hasApartment)
+            {
+                NavManager.NavigateTo("/create-apartment");
+            }
+            else
+            {
+                NavManager.NavigateTo("/dashboard");
+            }
+        }
+        else if (role == "Resident")
+        {
+            NavManager.NavigateTo("/resident-dashboard");
+        }
+        else
+        {
+            NavManager.NavigateTo("/");
+        }
+    }
+
+    public class LoginRequest
+    {
+        public string Username { get; set; } = "";
+        public string Password { get; set; } = "";
+    }
+}

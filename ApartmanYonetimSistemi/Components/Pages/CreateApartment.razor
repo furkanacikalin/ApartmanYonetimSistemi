@@ -1,0 +1,133 @@
+﻿@page "/create-apartment"
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<ApartmentContext> AptCtxFactory
+@inject IDbContextFactory<FlatContext> FlatCtxFactory
+@inject IDbContextFactory<UserContext> UserCtxFactory
+@inject NavigationManager NavManager
+
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6 shadow-lg p-5 rounded bg-white border-start border-success border-5">
+        <h2 class="mb-4 text-success fw-bold">Yeni Apartman Oluştur</h2>
+        <p class="text-muted">Sistemi kullanmaya başlamak için apartman bilgilerinizi kaydedin. Bu işlem sonucunda daireleriniz otomatik oluşturulacaktır.</p>
+
+        <hr />
+
+        <div class="mb-3">
+            <label class="fw-bold mb-1">Apartman Adı</label>
+            <input @bind="aptModel.Name" class="form-control form-control-lg" placeholder="Örn: Huzur Apartmanı" />
+        </div>
+
+        <div class="mb-3">
+            <label class="fw-bold mb-1">Adres</label>
+            <textarea @bind="aptModel.Address" class="form-control" rows="3" placeholder="Mahalle, Cadde, No..."></textarea>
+        </div>
+
+        <div class="mb-4">
+            <label class="fw-bold mb-1">Toplam Daire Sayısı</label>
+            <div class="input-group">
+                <span class="input-group-text"><i class="bi bi-houses"></i></span>
+                <input @bind="totalFlats" type="number" class="form-control" min="1" max="100" />
+            </div>
+            <small class="text-muted">Girdiğiniz sayı kadar boş daire kaydı açılacaktır.</small>
+        </div>
+
+        @if (!string.IsNullOrEmpty(errorMsg))
+        {
+            <div class="alert alert-danger py-2">
+                <i class="bi bi-exclamation-triangle"></i> @errorMsg
+            </div>
+        }
+
+        <button class="btn btn-success btn-lg w-100 shadow-sm" @onclick="SaveApartment">
+            Sistemi Kur ve Yönetime Başla
+        </button>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> authState { get; set; } = null!;
+
+    private Apartment aptModel = new();
+    private int totalFlats = 1;
+    private string? errorMsg;
+    private int currentUserId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await authState;
+        var user = auth.User;
+
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            var idClaim = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (int.TryParse(idClaim, out int id))
+            {
+                currentUserId = id;
+
+                
+                using var aptCtx = await AptCtxFactory.CreateDbContextAsync();
+                var hasApt = await aptCtx.Apartments.AnyAsync(a => a.AdminUserId == currentUserId);
+
+                if (hasApt)
+                {
+                    NavManager.NavigateTo("/dashboard");
+                }
+            }
+        }
+        else
+        {
+            NavManager.NavigateTo("/");
+        }
+    }
+
+    private async Task SaveApartment()
+    {
+        if (string.IsNullOrWhiteSpace(aptModel.Name) || totalFlats <= 0)
+        {
+            errorMsg = "Lütfen apartman adını ve geçerli bir daire sayısını giriniz!";
+            return;
+        }
+
+        try
+        {
+            
+            using var aptCtx = await AptCtxFactory.CreateDbContextAsync();
+            aptModel.AdminUserId = currentUserId;
+            aptCtx.Apartments.Add(aptModel);
+            await aptCtx.SaveChangesAsync();
+
+           
+            using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+            for (int i = 1; i <= totalFlats; i++)
+            {
+                flatCtx.Flats.Add(new Flat
+                {
+                    ApartmentId = aptModel.Id,
+                    FlatNumber = i,
+                    ResidentUserId = null
+                });
+            }
+            await flatCtx.SaveChangesAsync();
+
+            
+            using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+            var user = await userCtx.Users.FindAsync(currentUserId);
+            if (user != null && user.Role != "Admin")
+            {
+                user.Role = "Admin";
+                await userCtx.SaveChangesAsync();
+            }
+
+            NavManager.NavigateTo("/dashboard");
+        }
+        catch (Exception ex)
+        {
+            errorMsg = "Veritabanı hatası: " + ex.Message;
+        }
+    }
+}

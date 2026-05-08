@@ -1,0 +1,263 @@
+﻿@page "/payment-tracking"
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PaymentContext> PayCtxFactory
+@inject IDbContextFactory<FlatContext> FlatCtxFactory
+@inject IDbContextFactory<UserContext> UserCtxFactory
+
+<div class="container-fluid mt-4">
+    <div class="card shadow border-0">
+        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center py-3">
+            <h5 class="mb-0"><i class="bi bi-table me-2"></i>Genel Ödeme Takip Çizelgesi</h5>
+            <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-light d-flex align-items-center gap-2"
+                        @onclick="LoadPayments"
+                        disabled="@isLoading"
+                        style="min-width: 100px; justify-content: center;">
+                    @if (isLoading)
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                        <span>Yükleniyor</span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-arrow-clockwise"></i>
+                        <span>Yenile</span>
+                    }
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            
+            <div class="row mb-4">
+                <div class="col-md-4">
+                    <label class="small fw-bold">Daireye Göre Filtrele</label>
+                    <select class="form-select form-select-sm" @onchange="OnFlatFilterChanged">
+                        <option value="0">Tüm Daireler</option>
+                        @foreach (var flat in flatList.Where(f => f.ResidentUserId != null).OrderBy(f => f.FlatNumber))
+                        {
+                            var resident = userList.FirstOrDefault(u => u.Id == flat.ResidentUserId);
+                            <option value="@flat.Id">No: @flat.FlatNumber @(resident != null ? $"- {resident.FirstName} {resident.LastName}" : "")</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="small fw-bold">Ödeme Durumu</label>
+                    <select class="form-select form-select-sm" @onchange="OnStatusFilterChanged">
+                        <option value="all">Hepsi</option>
+                        <option value="unpaid">Ödenmemişler</option>
+                        <option value="paid">Ödenenler</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="small fw-bold">Kategori Filtresi</label>
+                    <select class="form-select form-select-sm" @onchange="OnCategoryFilterChanged">
+                        <option value="all">Tüm Kategoriler</option>
+                        @foreach (var category in allPayments.Select(p => p.Category).Distinct())
+                        {
+                            <option value="@category">@category</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Daire</th>
+                            <th>Sakin</th>
+                            <th>Kategori</th>
+                            <th>Açıklama</th>
+                            <th>Tutar</th>
+                            <th>Eklenme Tarihi</th>
+                            <th>Son Ödeme Tarihi</th>
+                            <th>Durum</th>
+                            <th>İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in displayedPayments)
+                        {
+                            var flatInfo = flatList.FirstOrDefault(f => f.Id == item.FlatId);
+                            var userInfo = userList.FirstOrDefault(u => u.Id == flatInfo?.ResidentUserId);
+
+                            <tr>
+                                <td><span class="fw-bold">No: @(flatInfo?.FlatNumber.ToString() ?? "?")</span></td>
+                                <td>
+                                    @if (userInfo != null)
+                                    {
+                                        <span>@userInfo.FirstName @userInfo.LastName</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small italic">Atanmamış</span>
+                                    }
+                                </td>
+                                <td><span class="badge bg-secondary">@item.Category</span></td>
+                                <td class="small">@item.Description</td>
+                                <td class="fw-bold text-primary">@item.Amount.ToString("C2")</td>
+
+                                
+                                <td class="small text-muted">@item.CreatedDate.ToString("dd.MM.yyyy HH:mm")</td>
+
+                                
+                                <td class="small fw-bold">
+                                    @if (item.DueDate == DateTime.MaxValue)
+                                    {
+                                        <span class="text-muted italic">Süresiz</span>
+                                    }
+                                    else
+                                    {
+                                        @item.DueDate.ToString("dd.MM.yyyy HH:mm")
+                                    }
+                                </td>
+
+                                <td>
+                                    @if (item.IsPaid)
+                                    {
+                                        <span class="badge bg-success">
+                                            <i class="bi bi-check-circle me-1"></i> Ödendi
+                                        </span>
+                                        <div style="font-size: 0.7rem;" class="text-muted">@item.PaidDate?.ToString("dd.MM.yyyy HH:mm")</div>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-danger">
+                                            <i class="bi bi-exclamation-triangle-fill me-1"></i> Bekliyor
+                                        </span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (!item.IsPaid)
+                                    {
+                                        <button class="btn btn-sm btn-success shadow-sm" @onclick="() => MarkAsPaid(item.Id)">
+                                            <i class="bi bi-cash"></i> Ödendi İşaretle
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-sm btn-outline-secondary" disabled>
+                                            <i class="bi bi-lock"></i>
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<Payment> allPayments = new();
+    private List<Payment> displayedPayments = new();
+    private List<Flat> flatList = new();
+    private List<User> userList = new();
+    private bool isLoading = false;
+
+    private string currentStatusFilter = "all";
+    private int currentFlatIdFilter = 0;
+    private string currentCategoryFilter = "all";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadPayments();
+    }
+
+    private async Task LoadPayments()
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        await Task.Delay(600);
+
+        try
+        {
+            using var payCtx = await PayCtxFactory.CreateDbContextAsync();
+            using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+            using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+
+            allPayments = await payCtx.Payments
+                .AsNoTracking()
+                .OrderByDescending(p => p.CreatedDate)
+                .ToListAsync();
+
+            flatList = await flatCtx.Flats.AsNoTracking().ToListAsync();
+            userList = await userCtx.Users.AsNoTracking().ToListAsync();
+
+            ApplyFilters();
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task MarkAsPaid(int paymentId)
+    {
+        using var payCtx = await PayCtxFactory.CreateDbContextAsync();
+        var payment = await payCtx.Payments.FindAsync(paymentId);
+
+        if (payment != null)
+        {
+            payment.IsPaid = true;
+            payment.PaidDate = DateTime.Now;
+            await payCtx.SaveChangesAsync();
+            await LoadPayments();
+        }
+    }
+
+    private void OnStatusFilterChanged(ChangeEventArgs e)
+    {
+        currentStatusFilter = e.Value?.ToString() ?? "all";
+        ApplyFilters();
+    }
+
+    private void OnFlatFilterChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int flatId))
+        {
+            currentFlatIdFilter = flatId;
+            ApplyFilters();
+        }
+    }
+
+    private void OnCategoryFilterChanged(ChangeEventArgs e)
+    {
+        currentCategoryFilter = e.Value?.ToString() ?? "all";
+        ApplyFilters();
+    }
+
+    private void ApplyFilters()
+    {
+        var query = allPayments.AsQueryable();
+
+        if (currentFlatIdFilter != 0)
+        {
+            query = query.Where(p => p.FlatId == currentFlatIdFilter);
+        }
+
+        if (currentStatusFilter == "paid")
+        {
+            query = query.Where(p => p.IsPaid);
+        }
+        else if (currentStatusFilter == "unpaid")
+        {
+            query = query.Where(p => !p.IsPaid);
+        }
+
+        if (currentCategoryFilter != "all")
+        {
+            query = query.Where(p => p.Category == currentCategoryFilter);
+        }
+
+        displayedPayments = query.ToList();
+    }
+}

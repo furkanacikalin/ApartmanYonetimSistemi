@@ -1,0 +1,247 @@
+﻿@page "/my-payments"
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using ApartmanYonetimSistemi.Services
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Resident")]
+@inject IDbContextFactory<PaymentContext> PayCtxFactory
+@inject IDbContextFactory<FlatContext> FlatCtxFactory
+@inject IDbContextFactory<UserContext> UserCtxFactory
+@inject IDbContextFactory<PaymentTransactionContext> TransCtxFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject PaymentService PaymentService
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4 class="fw-bold"><i class="bi bi-wallet2 me-2"></i>Ödemelerim ve Borçlarım</h4>
+        <span class="badge bg-primary px-3 py-2">Daire No: @residentFlat?.FlatNumber</span>
+    </div>
+
+    <div class="row">
+        @foreach (var pay in myPayments)
+        {
+            <div class="col-md-6 col-lg-4 mb-3">
+                <div class="card h-100 shadow-sm border-0 @(pay.IsPaid ? "border-start border-success border-5" : "border-start border-danger border-5")">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <span class="badge bg-light text-dark border">@pay.Category</span>
+                            @if (pay.IsPaid)
+                            {
+                                <span class="text-success small fw-bold"><i class="bi bi-check-circle-fill"></i> ÖDENDİ</span>
+                            }
+                            else
+                            {
+                                <span class="text-danger small fw-bold"><i class="bi bi-clock-history"></i> BEKLİYOR</span>
+                            }
+                        </div>
+                        <h5 class="card-title fw-bold">@pay.Amount.ToString("C2")</h5>
+                        <p class="card-text text-muted small">@pay.Description</p>
+                        <hr />
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="small text-muted">
+                                Son Tarih: @(pay.DueDate == DateTime.MaxValue ? "Süresiz" : pay.DueDate.ToString("dd.MM.yyyy HH:mm"))
+                            </span>
+
+                            @if (!pay.IsPaid)
+                            {
+                                <button class="btn btn-primary btn-sm" @onclick="() => OpenPaymentModal(pay)">
+                                    <i class="bi bi-credit-card me-1"></i>Ödeme Yap
+                                </button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+
+@if (showModal)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">Güvenli Ödeme - @selectedPayment?.Amount.ToString("C2")</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(errorMessage))
+                    {
+                        <div class="alert alert-danger">@errorMessage</div>
+                    }
+
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Kart Üzerindeki İsim</label>
+                        <input @bind="cardModel.CardHolderName" class="form-control" placeholder="AD SOYAD" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Kart Numarası</label>
+                        <input @bind="cardModel.CardNumber" class="form-control" maxlength="16" placeholder="0000 0000 0000 0000" />
+                    </div>
+                    <div class="row">
+                        <div class="col-4">
+                            <label class="form-label small fw-bold">Ay</label>
+                            <input @bind="cardModel.ExpireMonth" class="form-control" maxlength="2" placeholder="MM" />
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label small fw-bold">Yıl</label>
+                            <input @bind="cardModel.ExpireYear" class="form-control" maxlength="2" placeholder="YY" />
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label small fw-bold">CVC</label>
+                            <input @bind="cardModel.Cvc" class="form-control" maxlength="3" placeholder="000" />
+                        </div>
+                    </div>
+                    <div class="mt-3 text-center">
+                        <img src="https://www.iyzico.com/assets/images/content/iyzico_ile_ode_colored_horizontal.svg" width="120" alt="iyzico" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseModal" disabled="@isProcessing">İptal</button>
+                    <button class="btn btn-success px-4" @onclick="HandlePayment" disabled="@isProcessing">
+                        @if (isProcessing)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Ödemeyi Onayla
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<Payment> myPayments = new();
+    private Flat? residentFlat;
+    private User? currentUser;
+
+    
+    private bool showModal = false;
+    private bool isProcessing = false;
+    private string? errorMessage;
+    private Payment? selectedPayment;
+    private CardModel cardModel = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userId = int.Parse(authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "0");
+
+        using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+        currentUser = await userCtx.Users.FindAsync(userId);
+
+        using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+        residentFlat = await flatCtx.Flats.FirstOrDefaultAsync(f => f.ResidentUserId == userId);
+
+        if (residentFlat != null)
+        {
+            using var payCtx = await PayCtxFactory.CreateDbContextAsync();
+            myPayments = await payCtx.Payments
+                .Where(p => p.FlatId == residentFlat.Id)
+                .OrderByDescending(p => p.IsPaid) 
+                .ThenByDescending(p => p.DueDate)
+                .ToListAsync();
+        }
+    }
+
+    private void OpenPaymentModal(Payment pay)
+    {
+        selectedPayment = pay;
+        cardModel = new();
+        errorMessage = null;
+        showModal = true;
+    }
+
+    private void CloseModal()
+    {
+        if (!isProcessing) showModal = false;
+    }
+
+    private async Task HandlePayment()
+    {
+        if (selectedPayment == null || currentUser == null) return;
+
+        isProcessing = true;
+        errorMessage = null;
+
+        try
+        {
+            
+            var response = await PaymentService.ProcessPaymentAsync(
+                selectedPayment,
+                currentUser,
+                cardModel.CardHolderName,
+                cardModel.CardNumber,
+                cardModel.ExpireMonth,
+                "20" + cardModel.ExpireYear, 
+                cardModel.Cvc
+            );
+
+            if (response.IsSuccess)
+            {
+                
+                using var payCtx = await PayCtxFactory.CreateDbContextAsync();
+                using var transCtx = await TransCtxFactory.CreateDbContextAsync();
+
+                
+                var paymentRecord = await payCtx.Payments.FindAsync(selectedPayment.Id);
+                if (paymentRecord != null)
+                {
+                    paymentRecord.IsPaid = true;
+                    paymentRecord.PaidDate = DateTime.Now;
+                    await payCtx.SaveChangesAsync();
+                }
+
+                
+                transCtx.PaymentTransactions.Add(new PaymentTransaction
+                {
+                    PaymentId = selectedPayment.Id,
+                    UserId = currentUser.Id,
+                    Amount = selectedPayment.Amount,
+                    Status = "Success",
+                    IyzicoPaymentId = response.IyzicoPaymentId,
+                    TransactionDate = DateTime.Now
+                });
+                await transCtx.SaveChangesAsync();
+
+                showModal = false;
+                await LoadData(); 
+            }
+            else
+            {
+                errorMessage = response.ErrorMessage ?? "Ödeme işlemi banka tarafından reddedildi.";
+
+                
+                using var transCtx = await TransCtxFactory.CreateDbContextAsync();
+                transCtx.PaymentTransactions.Add(new PaymentTransaction
+                {
+                    PaymentId = selectedPayment.Id,
+                    UserId = currentUser.Id,
+                    Amount = selectedPayment.Amount,
+                    Status = "Failed",
+                    ErrorMessage = errorMessage,
+                    TransactionDate = DateTime.Now
+                });
+                await transCtx.SaveChangesAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "Sistem hatası oluştu: " + ex.Message;
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+}

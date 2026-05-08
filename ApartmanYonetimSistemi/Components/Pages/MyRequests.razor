@@ -1,0 +1,289 @@
+﻿@page "/my-requests"
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Resident")]
+@inject IDbContextFactory<RequestContext> ReqCtxFactory
+@inject IDbContextFactory<FlatContext> FlatCtxFactory
+@inject AuthenticationStateProvider AuthStateProvider
+
+<div class="container mt-4">
+    <div class="row">
+        
+        <div class="col-md-5 mb-4">
+            <div class="card shadow-sm border-0 p-4">
+                <h4 class="fw-bold text-primary mb-3">
+                    @(isEditing ? "Talebi Düzenle" : "Yeni Talep Oluştur")
+                </h4>
+
+                <div class="mb-3">
+                    <label class="small fw-bold">Talep Türü</label>
+                    <select @bind="newTicket.Type" class="form-select">
+                        <option value="Dilek">Dilek</option>
+                        <option value="Öneri">Öneri</option>
+                        <option value="Şikayet">Şikayet</option>
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label class="small fw-bold">Konu Başlığı</label>
+                    <input @bind="newTicket.Title" class="form-control" placeholder="Örn: Asansör arızası" />
+                </div>
+
+                <div class="mb-3">
+                    <label class="small fw-bold">Açıklamanız</label>
+                    <textarea @bind="newTicket.Description" class="form-control" rows="4" placeholder="Detayları buraya yazınız..."></textarea>
+                </div>
+
+                <div class="d-grid gap-2">
+                    <button class="btn btn-primary" @onclick="SubmitRequest" disabled="@isProcessing">
+                        @if (isProcessing)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        @(isEditing ? "Değişiklikleri Kaydet" : "Gönder")
+                    </button>
+                    @if (isEditing)
+                    {
+                        <button class="btn btn-light btn-sm" @onclick="CancelEdit">Düzenlemeyi İptal Et</button>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(msg))
+                {
+                    <div class="alert alert-info mt-3 small border-0 shadow-sm">@msg</div>
+                }
+            </div>
+        </div>
+
+        
+        <div class="col-md-7">
+            <h4 class="fw-bold mb-3 text-dark">Geçmiş Taleplerim</h4>
+            @if (isLoading)
+            {
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                </div>
+            }
+            else if (!myTickets.Any())
+            {
+                <div class="alert alert-light border small text-center py-4">
+                    <i class="bi bi-chat-dots fs-2 d-block mb-2 text-muted"></i>
+                    Henüz bir talebiniz bulunmuyor.
+                </div>
+            }
+            else
+            {
+                <div class="list-group">
+                    @foreach (var item in myTickets)
+                    {
+                        <div class="list-group-item border-0 shadow-sm mb-3 rounded p-3">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="badge @GetBadgeClass(item.Type)">@item.Type</span>
+                                <small class="text-muted">@item.CreatedDate.ToString("dd.MM.yyyy HH:mm")</small>
+                            </div>
+
+                            <h6 class="mt-2 fw-bold text-dark">@item.Title</h6>
+                            <p class="small text-secondary mb-2">@item.Description</p>
+
+                            @if (!string.IsNullOrEmpty(item.AdminNote))
+                            {
+                                <div class="bg-light p-2 rounded small border-start border-primary border-4 mb-2">
+                                    <strong>Yönetici Notu:</strong> @item.AdminNote
+                                </div>
+                            }
+
+                            <div class="d-flex justify-content-between align-items-center border-top pt-2">
+                                <div>
+                                    @if (!item.IsResolved)
+                                    {
+                                        <button class="btn btn-sm btn-outline-primary border-0 me-1" title="Düzenle" @onclick="() => PrepareEdit(item)">
+                                            <i class="bi bi-pencil-square"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger border-0" title="Geri Çek" @onclick="() => OpenDeleteModal(item.Id)">
+                                            <i class="bi bi-trash3"></i>
+                                        </button>
+                                    }
+                                </div>
+                                <div>
+                                    @if (item.IsResolved)
+                                    {
+                                        <span class="text-success small fw-bold"><i class="bi bi-check-circle-fill me-1"></i> Çözüldü</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-warning small fw-bold"><i class="bi bi-clock-history me-1"></i> İnceleniyor</span>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@if (showDeleteModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-danger text-white border-0">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-exclamation-triangle me-2"></i>Talebi Geri Çek</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body p-4 text-center">
+                    <p class="fs-5 mb-1">Bu talebi silmek istediğinizden emin misiniz?</p>
+                    <p class="text-muted small">Bu işlem geri alınamaz ve yönetici talebinizi artık göremez.</p>
+                </div>
+                <div class="modal-footer border-0 d-flex justify-content-center pb-4">
+                    <button type="button" class="btn btn-light px-4 fw-bold" @onclick="CloseModal">Vazgeç</button>
+                    <button type="button" class="btn btn-danger px-4 fw-bold" @onclick="ConfirmDelete">Evet, Sil</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private RequestTicket newTicket = new() { Type = "Dilek" };
+    private List<RequestTicket> myTickets = new();
+    private string msg = "";
+    private bool isLoading = true;
+    private bool isProcessing = false;
+
+    private bool isEditing = false;
+    private int editingId = 0;
+    private bool showDeleteModal = false;
+    private int ticketIdToDelete = 0;
+
+    protected override async Task OnInitializedAsync() => await LoadMyRequests();
+
+    private async Task LoadMyRequests()
+    {
+        isLoading = true;
+        var authStatus = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userIdClaim = authStatus.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        if (int.TryParse(userIdClaim, out int userId))
+        {
+            using var reqCtx = await ReqCtxFactory.CreateDbContextAsync();
+            myTickets = await reqCtx.RequestTickets
+                .Where(rt => rt.ResidentUserId == userId)
+                .OrderByDescending(rt => rt.CreatedDate)
+                .ToListAsync();
+        }
+        isLoading = false;
+    }
+
+    private void PrepareEdit(RequestTicket ticket)
+    {
+        isEditing = true;
+        editingId = ticket.Id;
+        newTicket = new RequestTicket
+        {
+            Title = ticket.Title,
+            Description = ticket.Description,
+            Type = ticket.Type
+        };
+        msg = "Düzenleme moduna geçildi.";
+    }
+
+    private void CancelEdit()
+    {
+        isEditing = false;
+        editingId = 0;
+        newTicket = new RequestTicket { Type = "Dilek" };
+        msg = "";
+    }
+
+    private void OpenDeleteModal(int id)
+    {
+        ticketIdToDelete = id;
+        showDeleteModal = true;
+    }
+
+    private void CloseModal()
+    {
+        showDeleteModal = false;
+        ticketIdToDelete = 0;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        using var reqCtx = await ReqCtxFactory.CreateDbContextAsync();
+        var ticket = await reqCtx.RequestTickets.FindAsync(ticketIdToDelete);
+
+        if (ticket != null && !ticket.IsResolved)
+        {
+            reqCtx.RequestTickets.Remove(ticket);
+            await reqCtx.SaveChangesAsync();
+            msg = "Talebiniz başarıyla silindi.";
+            await LoadMyRequests();
+        }
+        CloseModal();
+    }
+
+    private async Task SubmitRequest()
+    {
+        if (string.IsNullOrWhiteSpace(newTicket.Title) || string.IsNullOrWhiteSpace(newTicket.Description))
+        {
+            msg = "Lütfen tüm alanları doldurun.";
+            return;
+        }
+
+        isProcessing = true;
+        using var reqCtx = await ReqCtxFactory.CreateDbContextAsync();
+
+        if (isEditing)
+        {
+            var existing = await reqCtx.RequestTickets.FindAsync(editingId);
+            if (existing != null && !existing.IsResolved)
+            {
+                existing.Title = newTicket.Title;
+                existing.Description = newTicket.Description;
+                existing.Type = newTicket.Type;
+                await reqCtx.SaveChangesAsync();
+                msg = "Talebiniz güncellendi.";
+            }
+            isEditing = false;
+            editingId = 0;
+        }
+        else
+        {
+            var authStatus = await AuthStateProvider.GetAuthenticationStateAsync();
+            var userIdClaim = authStatus.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+            if (int.TryParse(userIdClaim, out int userId))
+            {
+                using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+                var flat = await flatCtx.Flats.FirstOrDefaultAsync(f => f.ResidentUserId == userId);
+
+                if (flat != null)
+                {
+                    newTicket.ResidentUserId = userId;
+                    newTicket.ApartmentId = flat.ApartmentId;
+                    newTicket.CreatedDate = DateTime.Now;
+
+                    reqCtx.RequestTickets.Add(newTicket);
+                    await reqCtx.SaveChangesAsync();
+                    msg = "Talebiniz yöneticiye iletildi.";
+                }
+            }
+        }
+
+        newTicket = new RequestTicket { Type = "Dilek" };
+        isProcessing = false;
+        await LoadMyRequests();
+    }
+
+    private string GetBadgeClass(string type) => type switch
+    {
+        "Şikayet" => "bg-danger",
+        "Öneri" => "bg-info text-dark",
+        _ => "bg-success"
+    };
+}
