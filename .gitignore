@@ -1,0 +1,9 @@
+# Veritabanları (Kendi verilerini yüklememek için)
+*.db
+*.db-journal
+
+# Visual Studio dosyaları
+.vs/
+bin/
+obj/
+appsettings.json

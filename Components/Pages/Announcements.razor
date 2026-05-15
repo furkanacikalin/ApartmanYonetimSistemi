@@ -1,0 +1,106 @@
+﻿@page "/announcements"
+@attribute [Authorize(Roles = "Resident")]
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<AnnouncementContext> AnnCtxFactory
+@inject IDbContextFactory<FlatContext> FlatCtxFactory
+
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-9">
+            <div class="d-flex align-items-center justify-content-between mb-4">
+                <h3 class="fw-bold mb-0">
+                    <i class="bi bi-megaphone-fill text-primary me-2"></i>Apartman Duyuruları
+                </h3>
+                <span class="text-muted small">Toplam @allAnnouncements.Count duyuru</span>
+            </div>
+
+            @if (allAnnouncements == null)
+            {
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Yükleniyor...</span>
+                    </div>
+                </div>
+            }
+            else if (!allAnnouncements.Any())
+            {
+                <div class="text-center p-5 bg-white shadow-sm rounded-4 border-0">
+                    <i class="bi bi-inbox display-1 text-light"></i>
+                    <p class="text-muted mt-3">Henüz yayınlanmış bir duyuru bulunmuyor.</p>
+                </div>
+            }
+            else
+            {
+                @foreach (var ann in allAnnouncements)
+                {
+                    <div class="card shadow-sm border-0 mb-4 overflow-hidden border-start border-primary border-5 rounded-3">
+                        <div class="card-body p-4">
+                            <div class="d-flex justify-content-between align-items-start mb-3">
+                                <h5 class="fw-bold text-dark mb-0">@ann.Title</h5>
+
+                                <div class="d-flex align-items-center">
+                                    @if (ann.UpdatedDate.HasValue)
+                                    {
+                                        <span class="badge bg-light text-info border border-info me-2 d-flex align-items-center py-2 px-3">
+                                            <i class="bi bi-clock-history me-2"></i>
+                                            @ann.UpdatedDate.Value.ToString("dd.MM.yyyy HH:mm")
+                                        </span>
+                                        <span class="badge rounded-pill bg-info text-dark shadow-sm" style="font-size: 0.75rem;">
+                                            Güncellendi
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-light text-primary border d-flex align-items-center py-2 px-3">
+                                            <i class="bi bi-calendar3 me-2"></i>
+                                            @ann.CreatedDate.ToString("dd.MM.yyyy HH:mm")
+                                        </span>
+                                    }
+                                </div>
+                            </div>
+
+                            <hr class="opacity-10" />
+
+                            <div class="announcement-content text-secondary lh-lg" style="white-space: pre-line;">
+                                @ann.Content
+                            </div>
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<Announcement> allAnnouncements = new();
+    [CascadingParameter] private Task<AuthenticationState> authState { get; set; } = null!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await authState;
+        var userIdClaim = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        if (int.TryParse(userIdClaim, out int userId))
+        {
+            
+            using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+            var flat = await flatCtx.Flats.FirstOrDefaultAsync(f => f.ResidentUserId == userId);
+
+            if (flat != null)
+            {
+                
+                using var annCtx = await AnnCtxFactory.CreateDbContextAsync();
+
+                allAnnouncements = await annCtx.Announcements
+                    .Where(a => a.ApartmentId == flat.ApartmentId)
+                    .OrderByDescending(a => (a.UpdatedDate ?? a.CreatedDate))
+                    .ToListAsync();
+            }
+        }
+    }
+}

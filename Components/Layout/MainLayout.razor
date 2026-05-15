@@ -1,0 +1,54 @@
+﻿@inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Components.Authorization
+@inject NavigationManager NavManager
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row px-4 d-flex justify-content-between align-items-center">
+            
+            <div>
+                <a href="/" class="text-decoration-none text-muted small"><i class="bi bi-house-door"></i> Ana Sayfa</a>
+            </div>
+
+           
+            <div class="d-flex align-items-center">
+                <AuthorizeView>
+                    <Authorized>
+                        <span class="me-3 text-dark fw-bold small">
+                            <i class="bi bi-person-circle me-1"></i> @context.User.Identity?.Name
+                            <span class="badge bg-secondary ms-1">@context.User.FindFirst(c => c.Type == System.Security.Claims.ClaimTypes.Role)?.Value</span>
+                        </span>
+                        <button class="btn btn-sm btn-outline-danger shadow-sm" @onclick="HandleLogout">
+                            <i class="bi bi-box-arrow-right"></i> Çıkış Yap
+                        </button>
+                    </Authorized>
+                    <NotAuthorized>
+                        <a href="/login" class="btn btn-sm btn-primary px-3 shadow-sm">
+                            <i class="bi bi-key-fill me-1"></i> Giriş Yap
+                        </a>
+                    </NotAuthorized>
+                </AuthorizeView>
+            </div>
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
+
+@code {
+
+@using ApartmanYonetimSistemi.Services
+@inject AuthenticationStateProvider AuthStateProvider
+
+    private async Task HandleLogout()
+{
+    await ((CustomAuthStateProvider)AuthStateProvider).UpdateAuthenticationState(null);
+    NavManager.NavigateTo("/", true);
+}
+}

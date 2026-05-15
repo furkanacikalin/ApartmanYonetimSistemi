@@ -1,0 +1,267 @@
+﻿@page "/dashboard"
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using ApartmanYonetimSistemi.Services
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<UserContext> UserCtxFactory
+@inject IDbContextFactory<ApartmentContext> AptCtxFactory
+@inject IDbContextFactory<FlatContext> FlatCtxFactory
+@inject SecurityService Security
+@inject NavigationManager NavManager
+
+<PageTitle>Yönetici Paneli - @currentApartment?.Name</PageTitle>
+
+<div class="container-fluid mt-4">
+    @if (currentApartment == null)
+    {
+        <div class="alert alert-warning text-center shadow-sm p-5">
+            <i class="bi bi-building-exclamation display-4 text-warning mb-3"></i>
+            <h4>Henüz bir apartman kurulumu yapmamışsınız.</h4>
+            <p>Sistemi kullanmaya başlamak için lütfen apartmanınızı oluşturun.</p>
+            <a href="/create-apartment" class="btn btn-warning btn-lg mt-2">
+                <i class="bi bi-plus-circle"></i> Apartman Oluştur
+            </a>
+        </div>
+    }
+    else
+    {
+        <div class="row">
+           
+            <div class="col-md-3">
+                <div class="card shadow border-0 bg-success text-white p-3 mb-4">
+                    <h4 class="fw-bold">@currentApartment.Name</h4>
+                    <p class="small opacity-75"><i class="bi bi-geo-alt"></i> @currentApartment.Address</p>
+                    <hr class="border-white opacity-25" />
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span>Toplam Daire:</span>
+                        <span class="badge bg-white text-success fs-6">@flatsWithResidents.Count</span>
+                    </div>
+                </div>
+            </div>
+
+            
+            <div class="col-md-9">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h3 class="fw-bold mb-0">Daire Yönetimi</h3>
+                </div>
+
+                <div class="row g-3">
+                    @foreach (var item in flatsWithResidents)
+                    {
+                        <div class="col-md-4 col-lg-3">
+                            <div class="card h-100 shadow-sm border-0 @(item.ResidentName == "BOŞ" ? "border-top border-warning border-4" : "border-top border-primary border-4")">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-start mb-2">
+                                        <h5 class="card-title text-muted mb-0">No: @item.Flat.FlatNumber</h5>
+                                        <i class="bi @(item.ResidentName == "BOŞ" ? "bi-house-dash text-warning" : "bi-house-check text-primary") h4"></i>
+                                    </div>
+                                    <div class="mt-3">
+                                        <small class="text-uppercase text-muted fw-bold" style="font-size: 0.7rem;">Sakin</small>
+                                        <p class="mb-0 @(item.ResidentName == "BOŞ" ? "text-warning fw-bold" : "text-dark")">
+                                            @item.ResidentName
+                                        </p>
+                                    </div>
+                                </div>
+                                <div class="card-footer bg-transparent border-0 pb-3">
+                                    @if (item.ResidentName == "BOŞ")
+                                    {
+                                        <button class="btn btn-sm btn-outline-warning w-100 fw-bold" @onclick="() => OpenResidentModal(item.Flat)">
+                                            <i class="bi bi-person-plus"></i> Sakin Ata
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-sm btn-outline-primary w-100 fw-bold">
+                                            <i class="bi bi-search"></i> Detaylar
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+
+@if (showModal)
+{
+    <div class="modal fade show d-block" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(3px);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-warning text-dark border-0">
+                    <h5 class="modal-title fw-bold">Daire @selectedFlat?.FlatNumber Sakin Kaydı</h5>
+                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold small">Adı</label>
+                            <input @bind="newFirstName" class="form-control" placeholder="Örn: Ahmet" />
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold small">Soyadı</label>
+                            <input @bind="newLastName" class="form-control" placeholder="Örn: Yılmaz" />
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Kullanıcı Adı</label>
+                        <input @bind="newResidentUsername" class="form-control" placeholder="Örn: a_yilmaz" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Geçici Şifre</label>
+                        <input @bind="newResidentPassword" type="text" class="form-control" placeholder="Girişte değiştirecek" />
+                    </div>
+                    @if (!string.IsNullOrEmpty(modalError))
+                    {
+                        <div class="alert alert-danger py-2 small">@modalError</div>
+                    }
+                </div>
+                <div class="modal-footer border-0">
+                    <button class="btn btn-light" @onclick="CloseModal">Vazgeç</button>
+                    <button class="btn btn-warning px-4 fw-bold" @onclick="AssignResident">Kaydet ve Yetkilendir</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> authState { get; set; } = null!;
+
+    private int currentUserId;
+    private Apartment? currentApartment;
+    private List<FlatViewModel> flatsWithResidents = new();
+
+    private bool showModal = false;
+    private Flat? selectedFlat;
+
+    private string newFirstName = "";
+    private string newLastName = "";
+    private string newResidentUsername = "";
+    private string newResidentPassword = "";
+    private string? modalError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await authState;
+        var user = auth.User;
+
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            var idClaim = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (int.TryParse(idClaim, out int id))
+            {
+                currentUserId = id;
+                await LoadData();
+            }
+        }
+        else
+        {
+            NavManager.NavigateTo("/");
+        }
+    }
+
+    private async Task LoadData()
+    {
+        using var aptCtx = await AptCtxFactory.CreateDbContextAsync();
+        currentApartment = await aptCtx.Apartments.FirstOrDefaultAsync(a => a.AdminUserId == currentUserId);
+
+        if (currentApartment != null)
+        {
+            using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+            var flats = await flatCtx.Flats
+                .Where(f => f.ApartmentId == currentApartment.Id)
+                .OrderBy(f => f.FlatNumber)
+                .ToListAsync();
+
+            using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+            flatsWithResidents.Clear();
+
+            foreach (var flat in flats)
+            {
+                var vm = new FlatViewModel { Flat = flat };
+                if (flat.ResidentUserId.HasValue)
+                {
+                    var user = await userCtx.Users.FindAsync(flat.ResidentUserId.Value);
+                    vm.ResidentName = user != null ? $"{user.FirstName} {user.LastName}" : "Bilinmiyor";
+                }
+                flatsWithResidents.Add(vm);
+            }
+        }
+    }
+
+    private void OpenResidentModal(Flat flat)
+    {
+        selectedFlat = flat;
+        newFirstName = "";
+        newLastName = "";
+        newResidentUsername = "";
+        newResidentPassword = "";
+        modalError = null;
+        showModal = true;
+    }
+
+    private void CloseModal() => showModal = false;
+
+    private async Task AssignResident()
+    {
+        if (string.IsNullOrWhiteSpace(newFirstName) || string.IsNullOrWhiteSpace(newLastName) ||
+            string.IsNullOrWhiteSpace(newResidentUsername) || string.IsNullOrWhiteSpace(newResidentPassword))
+        {
+            modalError = "Lütfen tüm alanları eksiksiz doldurun.";
+            return;
+        }
+
+        try
+        {
+            var (hash, salt) = Security.HashPassword(newResidentPassword);
+            var newUser = new User
+            {
+                Username = newResidentUsername,
+                FirstName = newFirstName,
+                LastName = newLastName,
+                PasswordHash = hash,
+                Salt = salt,
+                Role = "Resident",
+                MustChangePassword = true
+            };
+
+            
+            using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+            userCtx.Users.Add(newUser);
+            await userCtx.SaveChangesAsync();
+
+            
+            if (selectedFlat != null)
+            {
+                using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+                var flatToUpdate = await flatCtx.Flats.FindAsync(selectedFlat.Id);
+                if (flatToUpdate != null)
+                {
+                    flatToUpdate.ResidentUserId = newUser.Id;
+                    await flatCtx.SaveChangesAsync();
+                }
+            }
+
+            showModal = false;
+            await LoadData(); 
+        }
+        catch (Exception ex)
+        {
+            modalError = "Hata: " + ex.Message;
+        }
+    }
+
+    private class FlatViewModel
+    {
+        public Flat Flat { get; set; } = null!;
+        public string ResidentName { get; set; } = "BOŞ";
+    }
+}

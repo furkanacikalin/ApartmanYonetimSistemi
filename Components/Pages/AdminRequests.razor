@@ -1,0 +1,309 @@
+﻿@page "/admin-requests"
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using ApartmanYonetimSistemi.Services
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@using Mscc.GenerativeAI.Types
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<RequestContext> ReqCtxFactory
+@inject IDbContextFactory<UserContext> UserCtxFactory
+@inject IDbContextFactory<FlatContext> FlatCtxFactory
+@inject GeminiService GeminiService
+
+<div class="container-fluid mt-4 px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4 class="fw-bold text-dark mb-0">
+            <i class="bi bi-list-task me-2"></i>Talep Yönetimi
+        </h4>
+        
+        <div class="d-flex align-items-center gap-3">
+            
+            <div class="d-flex align-items-center bg-white border rounded shadow-sm px-2 py-1">
+                <span class="small fw-bold text-muted me-2 ps-1">Sırala:</span>
+                <div class="btn-group btn-group-sm">
+                    <button class="btn @(sortBy == "date" ? "btn-dark" : "btn-outline-secondary border-0")" 
+                            @onclick='() => SetSort("date")'>
+                        <i class="bi bi-calendar3 me-1"></i> Tarih
+                    </button>
+                    <button class="btn @(sortBy == "ai" ? "btn-warning" : "btn-outline-secondary border-0")" 
+                            @onclick='() => SetSort("ai")'>
+                        <i class="bi bi-robot me-1"></i> YZ Puanı
+                    </button>
+                </div>
+            </div>
+
+            
+            <button class="btn btn-outline-warning btn-sm shadow-sm fw-bold" @onclick="AnalyzeWithAI" disabled="@isAnalyzing">
+                @if (isAnalyzing)
+                {
+                    <span class="spinner-border spinner-border-sm me-1"></span> <span>Puanlar Güncelleniyor...</span>
+                }
+                else
+                {
+                    <i class="bi bi-arrow-repeat me-1"></i> <span>Tümünü Yeniden Analiz Et</span>
+                }
+            </button>
+
+            
+            <div class="btn-group btn-group-sm shadow-sm">
+                <button class="btn @(activeFilter == "Hepsi" ? "btn-primary" : "btn-outline-primary")" @onclick='() => SetFilter("Hepsi")'>Hepsi</button>
+                <button class="btn @(activeFilter == "Şikayet" ? "btn-danger" : "btn-outline-danger")" @onclick='() => SetFilter("Şikayet")'>Şikayet</button>
+                <button class="btn @(activeFilter == "Öneri" ? "btn-info" : "btn-outline-info")" @onclick='() => SetFilter("Öneri")'>Öneri</button>
+                <button class="btn @(activeFilter == "Dilek" ? "btn-success" : "btn-outline-success")" @onclick='() => SetFilter("Dilek")'>Dilek</button>
+            </div>
+        </div>
+    </div>
+
+    @if (filteredTickets == null)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else if (!filteredTickets.Any())
+    {
+        <div class="alert alert-light border text-center py-4">Kayıt bulunamadı.</div>
+    }
+    else
+    {
+        <div class="table-responsive shadow-sm rounded border">
+            <table class="table table-hover align-middle mb-0 bg-white">
+                <thead class="bg-light text-secondary">
+                    <tr>
+                        @if (sortBy == "ai") { <th style="width: 80px;" class="text-center">YZ Skoru</th> }
+                        <th style="width: 150px;">Sakin / Daire</th>
+                        <th style="width: 80px;">Tür</th>
+                        <th style="width: 120px;">Tarih</th>
+                        <th style="min-width: 200px;">Konu ve Detay</th>
+                        @if (sortBy == "ai") { <th style="width: 200px;">YZ Analizi</th> }
+                        <th style="width: 300px;">Durum / İşlem</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in GetSortedTickets())
+                    {
+                        <tr class="@(sortBy == "ai" ? GetRowClass(item) : (item.IsResolved ? "table-light opacity-75" : ""))">
+                            @if (sortBy == "ai")
+                            {
+                                <td class="text-center">
+                                    <div class="d-flex flex-column align-items-center">
+                                        <span class="badge @GetPriorityBadgeClass(item.PriorityScore) rounded-pill mb-1" style="font-size: 1rem; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
+                                            @(item.PriorityScore > 0 ? item.PriorityScore.ToString() : "-")
+                                        </span>
+                                        @if(item.PriorityScore == 5) { <small class="text-danger fw-bold" style="font-size:0.65rem">KRİTİK</small> }
+                                    </div>
+                                </td>
+                            }
+                            <td>
+                                @if (residentInfos.TryGetValue(item.ResidentUserId, out var info))
+                                {
+                                    <div class="fw-bold text-primary">Daire: @info.FlatNo</div>
+                                    <div class="small text-dark">@info.Name</div>
+                                }
+                            </td>
+                            <td>
+                                <span class="badge @GetBadgeClass(item.Type) d-block py-2">@item.Type</span>
+                            </td>
+                            <td>
+                                <div class="small fw-bold">@item.CreatedDate.ToString("dd.MM.yyyy")</div>
+                                <div class="small text-muted">@item.CreatedDate.ToString("HH:mm")</div>
+                            </td>
+                            <td>
+                                <div class="fw-bold text-dark mb-1">@item.Title</div>
+                                <div class="small text-muted" style="max-height: 50px; overflow-y: auto;">
+                                    @item.Description
+                                </div>
+                            </td>
+                            @if (sortBy == "ai")
+                            {
+                                <td>
+                                    @if (!string.IsNullOrEmpty(item.PriorityReason))
+                                    {
+                                        <div class="small text-dark" style="font-style: italic; line-height: 1.2;">
+                                            <i class="bi bi-robot me-1 text-warning"></i>@item.PriorityReason
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small">Analiz bekliyor...</span>
+                                    }
+                                </td>
+                            }
+                            <td class="pe-3">
+                                @if (item.IsResolved)
+                                {
+                                    <div class="bg-light p-2 rounded border border-success-subtle shadow-sm">
+                                        <div class="d-flex align-items-center mb-1">
+                                            <span class="badge bg-success me-2" style="font-size: 0.7rem;">Çözüldü</span>
+                                            <small class="text-muted fw-bold">Yanıtınız:</small>
+                                        </div>
+                                        <div class="small text-dark ps-1">@item.AdminNote</div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="d-flex flex-column gap-1">
+                                        <textarea class="form-control form-control-sm"
+                                                  placeholder="Yanıtınızı yazın..."
+                                                  rows="2"
+                                                  @bind="adminNotes[item.Id]"></textarea>
+                                        <button class="btn btn-sm btn-primary w-100" @onclick="() => ResolveTicket(item.Id)">
+                                            <i class="bi bi-send-check me-1"></i> Yanıtla ve Kapat
+                                        </button>
+                                    </div>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private List<RequestTicket> allTickets = new();
+    private List<RequestTicket> filteredTickets = new();
+    private string activeFilter = "Hepsi";
+    private string sortBy = "date";
+    private bool isAnalyzing = false;
+    private Dictionary<int, (string Name, string FlatNo)> residentInfos = new();
+    private Dictionary<int, string> adminNotes = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAllRequests();
+    }
+
+    private async Task LoadAllRequests()
+    {
+        using var reqCtx = await ReqCtxFactory.CreateDbContextAsync();
+        using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+        using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+
+        allTickets = await reqCtx.RequestTickets.ToListAsync();
+
+        foreach (var ticket in allTickets)
+        {
+            if (!residentInfos.ContainsKey(ticket.ResidentUserId))
+            {
+                var flat = await flatCtx.Flats.FirstOrDefaultAsync(f => f.ResidentUserId == ticket.ResidentUserId);
+                var user = await userCtx.Users.FirstOrDefaultAsync(u => u.Id == ticket.ResidentUserId);
+
+                if (flat != null && user != null)
+                    residentInfos[ticket.ResidentUserId] = (user.FirstName + " " + user.LastName, flat.FlatNumber.ToString());
+                else
+                    residentInfos[ticket.ResidentUserId] = ("Bilinmeyen", "N/A");
+            }
+            if (!adminNotes.ContainsKey(ticket.Id)) adminNotes[ticket.Id] = "";
+        }
+        ApplyFilter();
+    }
+
+    private IEnumerable<RequestTicket> GetSortedTickets()
+    {
+        if (sortBy == "ai")
+            return filteredTickets.OrderByDescending(x => x.PriorityScore).ThenByDescending(x => x.CreatedDate);
+        
+        return filteredTickets.OrderByDescending(x => x.CreatedDate);
+    }
+
+    private void SetSort(string mode)
+    {
+        sortBy = mode;
+        StateHasChanged();
+    }
+
+    private async Task AnalyzeWithAI()
+{
+    if (isAnalyzing) return; 
+    
+    isAnalyzing = true;
+    StateHasChanged(); 
+
+    try 
+    {
+        using var reqCtx = await ReqCtxFactory.CreateDbContextAsync();
+        
+        
+        var pendingTickets = allTickets.Where(x => !x.IsResolved).ToList();
+
+        foreach (var ticket in pendingTickets)
+        {
+            
+            var result = await GeminiService.AnalyzeRequestPriority(ticket.Title, ticket.Description);
+
+            var dbTicket = await reqCtx.RequestTickets.FindAsync(ticket.Id);
+            if (dbTicket != null)
+            {
+                dbTicket.PriorityScore = result.Score;
+                dbTicket.PriorityReason = result.Reason;
+            }
+        }
+
+        await reqCtx.SaveChangesAsync();
+        await LoadAllRequests(); 
+    }
+    catch (Exception ex)
+    {
+        
+        Console.WriteLine($"Analiz hatası: {ex.Message}");
+    }
+    finally 
+    {
+        isAnalyzing = false;
+        StateHasChanged();
+    }
+}
+
+    private void SetFilter(string filter)
+    {
+        activeFilter = filter;
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        if (activeFilter == "Hepsi")
+            filteredTickets = allTickets;
+        else
+            filteredTickets = allTickets.Where(x => x.Type == activeFilter).ToList();
+    }
+
+    private async Task ResolveTicket(int id)
+    {
+        using var reqCtx = await ReqCtxFactory.CreateDbContextAsync();
+        var ticket = await reqCtx.RequestTickets.FindAsync(id);
+        if (ticket != null)
+        {
+            ticket.IsResolved = true;
+            ticket.AdminNote = adminNotes.ContainsKey(id) && !string.IsNullOrWhiteSpace(adminNotes[id]) 
+                               ? adminNotes[id] : "İşlem tamamlandı.";
+            await reqCtx.SaveChangesAsync();
+            await LoadAllRequests();
+        }
+    }
+
+    private string GetBadgeClass(string type) => type switch
+    {
+        "Şikayet" => "bg-danger",
+        "Öneri" => "bg-info text-dark",
+        _ => "bg-success"
+    };
+
+    private string GetPriorityBadgeClass(int score) => score switch
+    {
+        5 => "bg-danger shadow",
+        4 => "bg-warning text-dark shadow-sm",
+        3 => "bg-primary text-white",
+        2 => "bg-info text-white",
+        _ => "bg-secondary text-white"
+    };
+
+    private string GetRowClass(RequestTicket item)
+    {
+        if (item.IsResolved) return "table-light opacity-75";
+        if (item.PriorityScore == 5) return "table-danger";
+        if (item.PriorityScore == 4) return "table-warning";
+        return "";
+    }
+}
