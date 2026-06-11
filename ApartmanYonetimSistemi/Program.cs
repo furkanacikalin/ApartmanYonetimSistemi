@@ -4,42 +4,27 @@ using Blazored.LocalStorage;
 using Microsoft.AspNetCore.Components.Authorization;
 using ApartmanYonetimSistemi.Services;
 using ApartmanYonetimSistemi.Models;
+using Microsoft.EntityFrameworkCore.Infrastructure; // Tablo oluþturma iþlemleri için eklendi
+using Microsoft.EntityFrameworkCore.Storage; // Tablo oluþturma iþlemleri için eklendi
 
 var builder = WebApplication.CreateBuilder(args);
 
 // ==========================================
-// POSTGRESQL BAÐLANTI AYARLARI
-// Kurulumda belirlediðin þifreyi buraya yaz:
+// CANLI VERÝTABANI BAÐLANTISI (NEON.TECH)
 // ==========================================
-string dbPassword = "1111";
+// Baðlantý cümlesini güvenli bir þekilde appsettings.json'dan çekiyoruz
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 
-builder.Services.AddDbContextFactory<UserContext>(options =>
-    options.UseNpgsql($"Host=localhost;Database=Apartman_Users;Username=postgres;Password={dbPassword}"));
-
-builder.Services.AddDbContextFactory<ApartmentContext>(options =>
-    options.UseNpgsql($"Host=localhost;Database=Apartman_Apartments;Username=postgres;Password={dbPassword}"));
-
-builder.Services.AddDbContextFactory<FlatContext>(options =>
-    options.UseNpgsql($"Host=localhost;Database=Apartman_Flats;Username=postgres;Password={dbPassword}"));
-
-builder.Services.AddDbContextFactory<AnnouncementContext>(options =>
-    options.UseNpgsql($"Host=localhost;Database=Apartman_Announcements;Username=postgres;Password={dbPassword}"));
-
-builder.Services.AddDbContextFactory<RequestContext>(options =>
-    options.UseNpgsql($"Host=localhost;Database=Apartman_Requests;Username=postgres;Password={dbPassword}"));
-
-builder.Services.AddDbContextFactory<PaymentContext>(options =>
-    options.UseNpgsql($"Host=localhost;Database=Apartman_Payments;Username=postgres;Password={dbPassword}"));
-
-builder.Services.AddDbContextFactory<PaymentTransactionContext>(options =>
-    options.UseNpgsql($"Host=localhost;Database=Apartman_Transactions;Username=postgres;Password={dbPassword}"));
-
-builder.Services.AddDbContextFactory<SurveyContext>(options =>
-    options.UseNpgsql($"Host=localhost;Database=Apartman_Surveys;Username=postgres;Password={dbPassword}"));
-
-// YENÝ: Bütçe ve Harcama Yönetimi için DbContext eklendi
-builder.Services.AddDbContextFactory<BudgetContext>(options =>
-    options.UseNpgsql($"Host=localhost;Database=Apartman_Budgets;Username=postgres;Password={dbPassword}"));
+// Artýk tüm veriler tek bir Neon veritabanýnda, kendi tablolarýnda tutulacak
+builder.Services.AddDbContextFactory<UserContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContextFactory<ApartmentContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContextFactory<FlatContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContextFactory<AnnouncementContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContextFactory<RequestContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContextFactory<PaymentContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContextFactory<PaymentTransactionContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContextFactory<SurveyContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContextFactory<BudgetContext>(options => options.UseNpgsql(connectionString));
 
 // Blazored LocalStorage Kaydý
 builder.Services.AddBlazoredLocalStorage();
@@ -87,18 +72,43 @@ using (var scope = app.Services.CreateScope())
         var payFactory = services.GetRequiredService<IDbContextFactory<PaymentContext>>();
         var transFactory = services.GetRequiredService<IDbContextFactory<PaymentTransactionContext>>();
         var surveyFactory = services.GetRequiredService<IDbContextFactory<SurveyContext>>();
-        var budgetFactory = services.GetRequiredService<IDbContextFactory<BudgetContext>>(); // YENÝ EKLENDÝ
+        var budgetFactory = services.GetRequiredService<IDbContextFactory<BudgetContext>>();
 
-        // PostgreSQL veritabanlarý ve tablolarý yoksa otomatik oluþturuluyor
-        using (var uCtx = userFactory.CreateDbContext()) uCtx.Database.EnsureCreated();
-        using (var aCtx = aptFactory.CreateDbContext()) aCtx.Database.EnsureCreated();
-        using (var fCtx = flatFactory.CreateDbContext()) fCtx.Database.EnsureCreated();
-        using (var nCtx = annFactory.CreateDbContext()) nCtx.Database.EnsureCreated();
-        using (var rCtx = reqFactory.CreateDbContext()) rCtx.Database.EnsureCreated();
-        using (var pCtx = payFactory.CreateDbContext()) pCtx.Database.EnsureCreated();
-        using (var tCtx = transFactory.CreateDbContext()) tCtx.Database.EnsureCreated();
-        using (var sCtx = surveyFactory.CreateDbContext()) sCtx.Database.EnsureCreated();
-        using (var bCtx = budgetFactory.CreateDbContext()) bCtx.Database.EnsureCreated(); // YENÝ EKLENDÝ
+        // Bütün contextleri bir diziye alýyoruz ki tek veritabanýnda tablolarý atlamadan açsýn
+        var contexts = new DbContext[]
+        {
+            userFactory.CreateDbContext(),
+            aptFactory.CreateDbContext(),
+            flatFactory.CreateDbContext(),
+            annFactory.CreateDbContext(),
+            reqFactory.CreateDbContext(),
+            payFactory.CreateDbContext(),
+            transFactory.CreateDbContext(),
+            surveyFactory.CreateDbContext(),
+            budgetFactory.CreateDbContext()
+        };
+
+        foreach (var ctx in contexts)
+        {
+            try
+            {
+                // 1. Eðer Neon'da veritabaný hiç yoksa ana veritabanýný oluþturur
+                ctx.Database.EnsureCreated();
+
+                // 2. Veritabaný var ama tablolar eksikse, o context'e ait tablolarý zorla oluþturur
+                var creator = ctx.Database.GetService<IRelationalDatabaseCreator>();
+                creator.CreateTables();
+            }
+            catch
+            {
+                // Eðer tablo zaten Neon'da baþarýyla oluþturulmuþsa CreateTables() hata fýrlatýr.
+                // Biz bu hatayý görmezden geliyoruz çünkü zaten istediðimiz þey tablonun var olmasý.
+            }
+            finally
+            {
+                ctx.Dispose(); // Hafýza sýzýntýsýný önlemek için iþi biteni kapatýyoruz
+            }
+        }
 
         using var userCtx = userFactory.CreateDbContext();
         if (!userCtx.Users.Any())
