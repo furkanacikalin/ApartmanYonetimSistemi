@@ -1,0 +1,302 @@
+﻿@page "/admin/profile"
+@attribute [Authorize(Roles = "Admin")]
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using ApartmanYonetimSistemi.Services
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<UserContext> UserCtxFactory
+@inject AuthenticationStateProvider AuthProvider
+@inject SecurityService Security
+
+<div class="container mt-4 mb-5">
+    <div class="d-flex align-items-center mb-4">
+        <h3 class="fw-bold mb-0"><i class="bi bi-person-gear text-primary me-2"></i>Yönetici Profilim</h3>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="row g-4">
+            <div class="col-lg-6">
+                <div class="card shadow-sm border-0 border-top border-primary border-4 rounded-3 h-100">
+                    <div class="card-body p-4">
+                        <h5 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                            <i class="bi bi-person-lines-fill me-2 text-primary"></i>Kişisel Bilgiler
+                        </h5>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold small">Adınız</label>
+                                <input type="text" class="form-control" @bind="editFirstName" />
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold small">Soyadınız</label>
+                                <input type="text" class="form-control" @bind="editLastName" />
+                            </div>
+                        </div>
+                        <div class="mb-4">
+                            <label class="form-label fw-bold small">Kullanıcı Adınız</label>
+                            <input type="text" class="form-control" @bind="editUsername" />
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(profileError))
+                        {
+                            <div class="alert alert-danger py-2 small fw-bold"><i class="bi bi-exclamation-triangle me-1"></i>@profileError</div>
+                        }
+                        @if (!string.IsNullOrEmpty(profileSuccess))
+                        {
+                            <div class="alert alert-success py-2 small fw-bold"><i class="bi bi-check-circle me-1"></i>@profileSuccess</div>
+                        }
+
+                        <button class="btn btn-primary w-100 fw-bold shadow-sm mt-auto" @onclick="UpdateProfile" disabled="@isProcessingProfile">
+                            @if (isProcessingProfile)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                        
+                                <span>Kaydediliyor...</span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-save me-1"></i>
+                        
+                                <span>Bilgileri Kaydet</span>
+                            }
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-6">
+                <div class="card shadow-sm border-0 border-top border-warning border-4 rounded-3 h-100">
+                    <div class="card-body p-4">
+                        <h5 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                            <i class="bi bi-shield-lock me-2 text-warning"></i>Şifre Değiştir
+                        </h5>
+
+                        <div class="mb-3">
+                            <label class="form-label fw-bold small">Mevcut Şifreniz</label>
+                            <input type="password" class="form-control" @bind="currentPassword" placeholder="Şu an kullandığınız şifre" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold small">Yeni Şifre</label>
+                            <input type="password" class="form-control" @bind="newPassword" placeholder="En az 6 karakter" />
+                        </div>
+                        <div class="mb-4">
+                            <label class="form-label fw-bold small">Yeni Şifre (Tekrar)</label>
+                            <input type="password" class="form-control" @bind="confirmPassword" placeholder="Yeni şifrenizi doğrulayın" />
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(passwordError))
+                        {
+                            <div class="alert alert-danger py-2 small fw-bold"><i class="bi bi-exclamation-triangle me-1"></i>@passwordError</div>
+                        }
+                        @if (!string.IsNullOrEmpty(passwordSuccess))
+                        {
+                            <div class="alert alert-success py-2 small fw-bold"><i class="bi bi-check-circle me-1"></i>@passwordSuccess</div>
+                        }
+
+                        <button class="btn btn-warning w-100 fw-bold shadow-sm text-dark mt-auto" @onclick="ChangePassword" disabled="@isProcessingPassword">
+                            @if (isProcessingPassword)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                        
+                                <span>Güncelleniyor...</span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-key me-1"></i>
+                        
+                                <span>Şifremi Güncelle</span>
+                            }
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> authState { get; set; } = null!;
+
+    private int currentUserId;
+    private User? currentUser;
+    private bool isLoading = true;
+
+    // Profil Değişkenleri
+    private string editFirstName = "";
+    private string editLastName = "";
+    private string editUsername = "";
+    private string? profileError;
+    private string? profileSuccess;
+    private bool isProcessingProfile = false;
+
+    // Şifre Değişkenleri
+    private string currentPassword = "";
+    private string newPassword = "";
+    private string confirmPassword = "";
+    private string? passwordError;
+    private string? passwordSuccess;
+    private bool isProcessingPassword = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await authState;
+        var userIdClaim = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        if (int.TryParse(userIdClaim, out int uid))
+        {
+            currentUserId = uid;
+            await LoadUserData();
+        }
+    }
+
+    private async Task LoadUserData()
+    {
+        try
+        {
+            using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+            currentUser = await userCtx.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == currentUserId);
+
+            if (currentUser != null)
+            {
+                editFirstName = currentUser.FirstName;
+                editLastName = currentUser.LastName;
+                editUsername = currentUser.Username;
+            }
+        }
+        catch (Exception ex)
+        {
+            profileError = "Kullanıcı bilgileri yüklenemedi: " + ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task UpdateProfile()
+    {
+        profileError = null;
+        profileSuccess = null;
+
+        if (string.IsNullOrWhiteSpace(editFirstName) || string.IsNullOrWhiteSpace(editLastName) || string.IsNullOrWhiteSpace(editUsername))
+        {
+            profileError = "Ad, soyad ve kullanıcı adı alanları boş bırakılamaz.";
+            return;
+        }
+
+        try
+        {
+            isProcessingProfile = true;
+            using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+
+            var isUsernameTaken = await userCtx.Users.AnyAsync(u => u.Username == editUsername && u.Id != currentUserId);
+            if (isUsernameTaken)
+            {
+                profileError = "Bu kullanıcı adı zaten başka bir üye tarafından kullanılıyor.";
+                return;
+            }
+
+            var userToUpdate = await userCtx.Users.FindAsync(currentUserId);
+            if (userToUpdate != null)
+            {
+                userToUpdate.FirstName = editFirstName;
+                userToUpdate.LastName = editLastName;
+                userToUpdate.Username = editUsername;
+                await userCtx.SaveChangesAsync();
+
+                // Kullanıcı adı değiştiği için oturumu yenile
+                if (AuthProvider is CustomAuthStateProvider customAuthProvider)
+                {
+                    await customAuthProvider.UpdateAuthenticationState(new UserSession
+                    {
+                        Id = userToUpdate.Id,
+                        Username = userToUpdate.Username,
+                        Role = userToUpdate.Role
+                    });
+                }
+
+                profileSuccess = "Yönetici profil bilgileriniz başarıyla güncellendi.";
+            }
+        }
+        catch (Exception ex)
+        {
+            profileError = "Güncelleme sırasında hata oluştu: " + ex.Message;
+        }
+        finally
+        {
+            isProcessingProfile = false;
+        }
+    }
+
+    private async Task ChangePassword()
+    {
+        passwordError = null;
+        passwordSuccess = null;
+
+        if (string.IsNullOrWhiteSpace(currentPassword) || string.IsNullOrWhiteSpace(newPassword) || string.IsNullOrWhiteSpace(confirmPassword))
+        {
+            passwordError = "Lütfen tüm şifre alanlarını doldurun.";
+            return;
+        }
+
+        if (newPassword.Length < 6)
+        {
+            passwordError = "Yeni şifreniz en az 6 karakter olmalıdır.";
+            return;
+        }
+
+        if (newPassword != confirmPassword)
+        {
+            passwordError = "Girdiğiniz yeni şifreler birbiriyle uyuşmuyor.";
+            return;
+        }
+
+        try
+        {
+            isProcessingPassword = true;
+            using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+            var userToUpdate = await userCtx.Users.FindAsync(currentUserId);
+
+            if (userToUpdate != null)
+            {
+                bool isCurrentPasswordValid = Security.VerifyPassword(currentPassword, userToUpdate.PasswordHash, userToUpdate.Salt);
+
+                if (!isCurrentPasswordValid)
+                {
+                    passwordError = "Mevcut şifrenizi hatalı girdiniz.";
+                    return;
+                }
+
+                var (newHash, newSalt) = Security.HashPassword(newPassword);
+                userToUpdate.PasswordHash = newHash;
+                userToUpdate.Salt = newSalt;
+
+                await userCtx.SaveChangesAsync();
+
+                currentPassword = "";
+                newPassword = "";
+                confirmPassword = "";
+                passwordSuccess = "Şifreniz başarıyla değiştirildi.";
+            }
+        }
+        catch (Exception ex)
+        {
+            passwordError = "Şifre güncellenirken bir hata oluştu: " + ex.Message;
+        }
+        finally
+        {
+            isProcessingPassword = false;
+        }
+    }
+}

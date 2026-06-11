@@ -41,7 +41,8 @@
                         <hr />
                         <div class="d-flex justify-content-between align-items-center">
                             <span class="small text-muted">
-                                Son Tarih: @(pay.DueDate == DateTime.MaxValue ? "Süresiz" : pay.DueDate.ToString("dd.MM.yyyy HH:mm"))
+                                @* DİKKAT: ToLocalTime eklendi ve MaxValue kontrolü Year == 9999 yapıldı *@
+                                Son Tarih: @(pay.DueDate.Year == 9999 ? "Süresiz" : pay.DueDate.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))
                             </span>
 
                             @if (!pay.IsPaid)
@@ -120,7 +121,6 @@
     private Flat? residentFlat;
     private User? currentUser;
 
-    
     private bool showModal = false;
     private bool isProcessing = false;
     private string? errorMessage;
@@ -148,7 +148,7 @@
             using var payCtx = await PayCtxFactory.CreateDbContextAsync();
             myPayments = await payCtx.Payments
                 .Where(p => p.FlatId == residentFlat.Id)
-                .OrderByDescending(p => p.IsPaid) 
+                .OrderByDescending(p => p.IsPaid)
                 .ThenByDescending(p => p.DueDate)
                 .ToListAsync();
         }
@@ -176,33 +176,30 @@
 
         try
         {
-            
             var response = await PaymentService.ProcessPaymentAsync(
                 selectedPayment,
                 currentUser,
                 cardModel.CardHolderName,
                 cardModel.CardNumber,
                 cardModel.ExpireMonth,
-                "20" + cardModel.ExpireYear, 
+                "20" + cardModel.ExpireYear,
                 cardModel.Cvc
             );
 
             if (response.IsSuccess)
             {
-                
                 using var payCtx = await PayCtxFactory.CreateDbContextAsync();
                 using var transCtx = await TransCtxFactory.CreateDbContextAsync();
 
-                
                 var paymentRecord = await payCtx.Payments.FindAsync(selectedPayment.Id);
                 if (paymentRecord != null)
                 {
                     paymentRecord.IsPaid = true;
-                    paymentRecord.PaidDate = DateTime.Now;
+                    // DİKKAT: DateTime.Now yerine DateTime.UtcNow kullanıldı
+                    paymentRecord.PaidDate = DateTime.UtcNow;
                     await payCtx.SaveChangesAsync();
                 }
 
-                
                 transCtx.PaymentTransactions.Add(new PaymentTransaction
                 {
                     PaymentId = selectedPayment.Id,
@@ -210,18 +207,18 @@
                     Amount = selectedPayment.Amount,
                     Status = "Success",
                     IyzicoPaymentId = response.IyzicoPaymentId,
-                    TransactionDate = DateTime.Now
+                    // DİKKAT: DateTime.Now yerine DateTime.UtcNow kullanıldı
+                    TransactionDate = DateTime.UtcNow
                 });
                 await transCtx.SaveChangesAsync();
 
                 showModal = false;
-                await LoadData(); 
+                await LoadData();
             }
             else
             {
                 errorMessage = response.ErrorMessage ?? "Ödeme işlemi banka tarafından reddedildi.";
 
-                
                 using var transCtx = await TransCtxFactory.CreateDbContextAsync();
                 transCtx.PaymentTransactions.Add(new PaymentTransaction
                 {
@@ -230,7 +227,8 @@
                     Amount = selectedPayment.Amount,
                     Status = "Failed",
                     ErrorMessage = errorMessage,
-                    TransactionDate = DateTime.Now
+                    // DİKKAT: DateTime.Now yerine DateTime.UtcNow kullanıldı
+                    TransactionDate = DateTime.UtcNow
                 });
                 await transCtx.SaveChangesAsync();
             }

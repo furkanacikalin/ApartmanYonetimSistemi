@@ -1,6 +1,7 @@
 ﻿@page "/my-requests"
 @using ApartmanYonetimSistemi.Models
 @using ApartmanYonetimSistemi.Data
+@using ApartmanYonetimSistemi.Services
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.EntityFrameworkCore
@@ -8,10 +9,12 @@
 @inject IDbContextFactory<RequestContext> ReqCtxFactory
 @inject IDbContextFactory<FlatContext> FlatCtxFactory
 @inject AuthenticationStateProvider AuthStateProvider
+@inject GeminiService AiService
 
 <div class="container mt-4">
     <div class="row">
-        
+
+        @* Sol Taraf: Talep Oluşturma Formu *@
         <div class="col-md-5 mb-4">
             <div class="card shadow-sm border-0 p-4">
                 <h4 class="fw-bold text-primary mb-3">
@@ -20,7 +23,7 @@
 
                 <div class="mb-3">
                     <label class="small fw-bold">Talep Türü</label>
-                    <select @bind="newTicket.Type" class="form-select">
+                    <select @bind="newTicket.Type" class="form-select border-0 bg-light">
                         <option value="Dilek">Dilek</option>
                         <option value="Öneri">Öneri</option>
                         <option value="Şikayet">Şikayet</option>
@@ -29,25 +32,29 @@
 
                 <div class="mb-3">
                     <label class="small fw-bold">Konu Başlığı</label>
-                    <input @bind="newTicket.Title" class="form-control" placeholder="Örn: Asansör arızası" />
+                    <input @bind="newTicket.Title" class="form-control border-0 bg-light" placeholder="Örn: Asansör arızası" />
                 </div>
 
                 <div class="mb-3">
                     <label class="small fw-bold">Açıklamanız</label>
-                    <textarea @bind="newTicket.Description" class="form-control" rows="4" placeholder="Detayları buraya yazınız..."></textarea>
+                    <textarea @bind="newTicket.Description" class="form-control border-0 bg-light" rows="4" placeholder="Detayları buraya yazınız..."></textarea>
                 </div>
 
                 <div class="d-grid gap-2">
-                    <button class="btn btn-primary" @onclick="SubmitRequest" disabled="@isProcessing">
+                    <button class="btn btn-primary shadow-sm" @onclick="SubmitRequest" disabled="@isProcessing">
                         @if (isProcessing)
                         {
                             <span class="spinner-border spinner-border-sm me-2"></span>
+                            <span>Analiz Ediliyor...</span>
                         }
-                        @(isEditing ? "Değişiklikleri Kaydet" : "Gönder")
+                        else
+                        {
+                            @(isEditing ? "Değişiklikleri Kaydet" : "Gönder")
+                        }
                     </button>
                     @if (isEditing)
                     {
-                        <button class="btn btn-light btn-sm" @onclick="CancelEdit">Düzenlemeyi İptal Et</button>
+                        <button class="btn btn-light btn-sm mt-1" @onclick="CancelEdit">Düzenlemeyi İptal Et</button>
                     }
                 </div>
 
@@ -58,7 +65,7 @@
             </div>
         </div>
 
-        
+        @* Sağ Taraf: Geçmiş Talepler Listesi *@
         <div class="col-md-7">
             <h4 class="fw-bold mb-3 text-dark">Geçmiş Taleplerim</h4>
             @if (isLoading)
@@ -69,41 +76,44 @@
             }
             else if (!myTickets.Any())
             {
-                <div class="alert alert-light border small text-center py-4">
-                    <i class="bi bi-chat-dots fs-2 d-block mb-2 text-muted"></i>
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-chat-dots fs-2 d-block mb-2"></i>
                     Henüz bir talebiniz bulunmuyor.
                 </div>
             }
             else
             {
-                <div class="list-group">
+                <div class="list-group list-group-flush">
                     @foreach (var item in myTickets)
                     {
-                        <div class="list-group-item border-0 shadow-sm mb-3 rounded p-3">
+                        @* border-0 ve shadow-sm ile çerçeveyi kaldırdık *@
+                        <div class="list-group-item border-0 shadow-sm mb-3 rounded-4 p-4 bg-white">
                             <div class="d-flex justify-content-between align-items-center">
-                                <span class="badge @GetBadgeClass(item.Type)">@item.Type</span>
-                                <small class="text-muted">@item.CreatedDate.ToString("dd.MM.yyyy HH:mm")</small>
+                                <span class="badge @GetBadgeClass(item.Type) rounded-pill px-3">@item.Type</span>
+                                @* DİKKAT: ToLocalTime() eklendi *@
+                                <small class="text-muted small">@item.CreatedDate.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</small>
                             </div>
 
-                            <h6 class="mt-2 fw-bold text-dark">@item.Title</h6>
-                            <p class="small text-secondary mb-2">@item.Description</p>
+                            <h6 class="mt-3 fw-bold text-dark fs-5">@item.Title</h6>
+                            <p class="text-secondary mb-3">@item.Description</p>
 
                             @if (!string.IsNullOrEmpty(item.AdminNote))
                             {
-                                <div class="bg-light p-2 rounded small border-start border-primary border-4 mb-2">
-                                    <strong>Yönetici Notu:</strong> @item.AdminNote
+                                <div class="bg-light p-3 rounded-3 small border-start border-primary border-4 mb-3">
+                                    <strong class="d-block mb-1">Yönetici Yanıtı:</strong> @item.AdminNote
                                 </div>
                             }
 
-                            <div class="d-flex justify-content-between align-items-center border-top pt-2">
+                            @* Alt Bilgi Alanı: Çizgiyi de kaldırmak istersen border-top sınıfını silebilirsin *@
+                            <div class="d-flex justify-content-between align-items-center pt-3 mt-2 border-top">
                                 <div>
                                     @if (!item.IsResolved)
                                     {
-                                        <button class="btn btn-sm btn-outline-primary border-0 me-1" title="Düzenle" @onclick="() => PrepareEdit(item)">
-                                            <i class="bi bi-pencil-square"></i>
+                                        <button class="btn btn-sm btn-outline-primary border-0 me-2 shadow-none" title="Düzenle" @onclick="() => PrepareEdit(item)">
+                                            <i class="bi bi-pencil-square fs-6"></i>
                                         </button>
-                                        <button class="btn btn-sm btn-outline-danger border-0" title="Geri Çek" @onclick="() => OpenDeleteModal(item.Id)">
-                                            <i class="bi bi-trash3"></i>
+                                        <button class="btn btn-sm btn-outline-danger border-0 shadow-none" title="Geri Çek" @onclick="() => OpenDeleteModal(item.Id)">
+                                            <i class="bi bi-trash3 fs-6"></i>
                                         </button>
                                     }
                                 </div>
@@ -126,22 +136,23 @@
     </div>
 </div>
 
+@* Silme Onay Modalı *@
 @if (showDeleteModal)
 {
-    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.4); backdrop-filter: blur(4px);">
         <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content border-0 shadow">
-                <div class="modal-header bg-danger text-white border-0">
-                    <h5 class="modal-title fw-bold"><i class="bi bi-exclamation-triangle me-2"></i>Talebi Geri Çek</h5>
+            <div class="modal-content border-0 shadow-lg rounded-4">
+                <div class="modal-header bg-danger text-white border-0 py-3">
+                    <h5 class="modal-title fw-bold m-0"><i class="bi bi-exclamation-triangle me-2"></i>Talebi Geri Çek</h5>
                     <button type="button" class="btn-close btn-close-white" @onclick="CloseModal"></button>
                 </div>
                 <div class="modal-body p-4 text-center">
-                    <p class="fs-5 mb-1">Bu talebi silmek istediğinizden emin misiniz?</p>
-                    <p class="text-muted small">Bu işlem geri alınamaz ve yönetici talebinizi artık göremez.</p>
+                    <p class="fs-5 mb-1 fw-bold">Bu talebi silmek istediğinizden emin misiniz?</p>
+                    <p class="text-muted">Bu işlem geri alınamaz ve yönetici talebinizi artık göremez.</p>
                 </div>
                 <div class="modal-footer border-0 d-flex justify-content-center pb-4">
-                    <button type="button" class="btn btn-light px-4 fw-bold" @onclick="CloseModal">Vazgeç</button>
-                    <button type="button" class="btn btn-danger px-4 fw-bold" @onclick="ConfirmDelete">Evet, Sil</button>
+                    <button type="button" class="btn btn-light px-4 fw-bold rounded-pill" @onclick="CloseModal">Vazgeç</button>
+                    <button type="button" class="btn btn-danger px-4 fw-bold rounded-pill shadow" @onclick="ConfirmDelete">Evet, Sil</button>
                 </div>
             </div>
         </div>
@@ -154,7 +165,6 @@
     private string msg = "";
     private bool isLoading = true;
     private bool isProcessing = false;
-
     private bool isEditing = false;
     private int editingId = 0;
     private bool showDeleteModal = false;
@@ -236,7 +246,10 @@
         }
 
         isProcessing = true;
+        msg = "Yapay zeka talebinizi analiz ediyor...";
+
         using var reqCtx = await ReqCtxFactory.CreateDbContextAsync();
+        var aiResult = await AiService.AnalyzeRequestPriority(newTicket.Title, newTicket.Description);
 
         if (isEditing)
         {
@@ -246,8 +259,11 @@
                 existing.Title = newTicket.Title;
                 existing.Description = newTicket.Description;
                 existing.Type = newTicket.Type;
+                existing.PriorityScore = aiResult.Score;
+                existing.PriorityReason = aiResult.Reason;
+
                 await reqCtx.SaveChangesAsync();
-                msg = "Talebiniz güncellendi.";
+                msg = "Talebiniz güncellendi ve yeniden analiz edildi.";
             }
             isEditing = false;
             editingId = 0;
@@ -266,11 +282,14 @@
                 {
                     newTicket.ResidentUserId = userId;
                     newTicket.ApartmentId = flat.ApartmentId;
-                    newTicket.CreatedDate = DateTime.Now;
+                    // DİKKAT: DateTime.Now yerine DateTime.UtcNow kullanıldı
+                    newTicket.CreatedDate = DateTime.UtcNow;
+                    newTicket.PriorityScore = aiResult.Score;
+                    newTicket.PriorityReason = aiResult.Reason;
 
                     reqCtx.RequestTickets.Add(newTicket);
                     await reqCtx.SaveChangesAsync();
-                    msg = "Talebiniz yöneticiye iletildi.";
+                    msg = "Talebiniz iletildi.";
                 }
             }
         }
@@ -282,8 +301,8 @@
 
     private string GetBadgeClass(string type) => type switch
     {
-        "Şikayet" => "bg-danger",
+        "Şikayet" => "bg-danger text-white",
         "Öneri" => "bg-info text-dark",
-        _ => "bg-success"
+        _ => "bg-success text-white"
     };
 }

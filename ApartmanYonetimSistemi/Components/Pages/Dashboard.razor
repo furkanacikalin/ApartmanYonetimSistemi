@@ -29,7 +29,7 @@
     else
     {
         <div class="row">
-           
+
             <div class="col-md-3">
                 <div class="card shadow border-0 bg-success text-white p-3 mb-4">
                     <h4 class="fw-bold">@currentApartment.Name</h4>
@@ -42,7 +42,6 @@
                 </div>
             </div>
 
-            
             <div class="col-md-9">
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <h3 class="fw-bold mb-0">Daire Yönetimi</h3>
@@ -74,9 +73,9 @@
                                     }
                                     else
                                     {
-                                        <button class="btn btn-sm btn-outline-primary w-100 fw-bold">
+                                        <a href="/admin/flat-inquiry/@item.Flat.Id" class="btn btn-sm btn-outline-primary w-100 fw-bold">
                                             <i class="bi bi-search"></i> Detaylar
-                                        </button>
+                                        </a>
                                     }
                                 </div>
                             </div>
@@ -87,7 +86,6 @@
         </div>
     }
 </div>
-
 
 @if (showModal)
 {
@@ -233,12 +231,10 @@
                 MustChangePassword = true
             };
 
-            
             using var userCtx = await UserCtxFactory.CreateDbContextAsync();
             userCtx.Users.Add(newUser);
             await userCtx.SaveChangesAsync();
 
-            
             if (selectedFlat != null)
             {
                 using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
@@ -251,7 +247,7 @@
             }
 
             showModal = false;
-            await LoadData(); 
+            await LoadData();
         }
         catch (Exception ex)
         {

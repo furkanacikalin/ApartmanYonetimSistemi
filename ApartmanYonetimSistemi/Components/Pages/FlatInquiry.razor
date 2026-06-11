@@ -1,0 +1,741 @@
+﻿@page "/admin/flat-inquiry"
+@page "/admin/flat-inquiry/{FlatId:int}"
+@attribute [Authorize(Roles = "Admin")]
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using ApartmanYonetimSistemi.Services
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<FlatContext> FlatCtxFactory
+@inject IDbContextFactory<UserContext> UserCtxFactory
+@inject IDbContextFactory<PaymentContext> PaymentCtxFactory
+@inject IDbContextFactory<ApartmentContext> AptCtxFactory
+@inject NavigationManager NavManager
+@inject AuthenticationStateProvider AuthStateProvider
+
+<div class="container mt-4">
+    <div class="d-flex align-items-center mb-4">
+        <a href="/dashboard" class="btn btn-outline-secondary btn-sm me-3 shadow-sm">
+            <i class="bi bi-arrow-left"></i> Panele Dön
+        </a>
+        <h3 class="fw-bold mb-0"><i class="bi bi-search text-primary me-2"></i>Daire Sorgulama Detayları</h3>
+    </div>
+
+    @if (!FlatId.HasValue)
+    {
+        <div class="row justify-content-center mt-5">
+            <div class="col-md-6">
+                <div class="card shadow-sm border-0 border-top border-primary border-4 rounded-3 text-center p-5">
+                    <i class="bi bi-building display-4 text-primary mb-3"></i>
+                    <h4 class="fw-bold">Hızlı Daire Sorgulama</h4>
+                    <p class="text-muted">Detaylarını görmek istediğiniz daire numarasını (Örn: 3) giriniz.</p>
+
+                    <div class="input-group mt-3 mb-2 shadow-sm rounded">
+                        <span class="input-group-text bg-white border-end-0"><i class="bi bi-hash"></i></span>
+                        <input type="number" class="form-control form-control-lg border-start-0"
+                               placeholder="Daire No"
+                               @bind="searchFlatNumber"
+                               @onkeyup="HandleKeyUp" />
+                        <button class="btn btn-primary px-4 fw-bold" type="button" @onclick="SearchFlat">
+                            <i class="bi bi-search me-1"></i> Sorgula
+                        </button>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(searchError))
+                    {
+                        <div class="text-danger mt-2 small fw-bold">
+                            <i class="bi bi-exclamation-circle me-1"></i> @searchError
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        @if (isLoading)
+        {
+            <div class="text-center py-5">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Yükleniyor...</span>
+                </div>
+            </div>
+        }
+        else if (flat == null)
+        {
+            <div class="alert alert-danger shadow-sm border-0 d-flex align-items-center" role="alert">
+                <i class="bi bi-exclamation-triangle-fill fs-4 me-2"></i>
+                <div>Aradığınız daire sistemde bulunamadı veya silinmiş olabilir.</div>
+            </div>
+        }
+        else
+        {
+            <div class="row g-4">
+                <div class="col-lg-4">
+                    <div class="card shadow-sm border-0 border-top border-primary border-4 mb-4 rounded-3">
+                        <div class="card-body">
+                            <h5 class="fw-bold text-dark border-bottom pb-2 mb-3"><i class="bi bi-building me-2 text-primary"></i>Mülk Bilgisi</h5>
+                            <div class="mb-2"><strong>Blok:</strong> <span class="badge bg-secondary">@flat.Block Blok</span></div>
+                            <div class="mb-2"><strong>Kat:</strong> @flat.Floor .Kat</div>
+                            <div class="mb-2"><strong>Daire No:</strong> <span class="fw-bold text-primary">No: @flat.FlatNumber</span></div>
+                        </div>
+                    </div>
+
+                    <div class="card shadow-sm border-0 border-top border-success border-4 rounded-3">
+                        <div class="card-body">
+                            <h5 class="fw-bold text-dark border-bottom pb-2 mb-3"><i class="bi bi-person-badge me-2 text-success"></i>Daire Sakini</h5>
+                            @if (resident == null)
+                            {
+                                <div class="text-muted small py-2">
+                                    <i class="bi bi-person-x me-2"></i>Bu daireye henüz bir sakin atanmamış.
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="mb-2">
+                                    <strong>Ad Soyad:</strong> @resident.FirstName @resident.LastName
+                                    @if (isOwnFlat)
+                                    {
+                                        <span class="badge bg-primary ms-1">Benim Dairem</span>
+                                    }
+                                </div>
+                                <div class="mb-2"><strong>Kullanıcı Adı:</strong> <span class="text-muted">@@@resident.Username</span></div>
+                                <div class="mb-2">
+                                    <strong>Durum:</strong>
+                                    @if (resident.MustChangePassword)
+                                    {
+                                        <span class="badge bg-warning text-dark">Şifre Değiştirmedi</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-success">Aktif Kullanıcı</span>
+                                    }
+                                </div>
+
+                                <hr class="opacity-25 my-3" />
+
+                                <div class="d-flex flex-column gap-2">
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-sm btn-outline-primary flex-fill" @onclick="OpenEditModal">
+                                            <i class="bi bi-pencil"></i> Bilgileri Güncelle
+                                        </button>
+
+                                        @if (isOwnFlat)
+                                        {
+                                            <button class="btn btn-sm btn-outline-danger flex-fill" @onclick="OpenSelfEvictModal">
+                                                <i class="bi bi-person-x"></i> Daireyi Boşalt
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-outline-danger flex-fill" @onclick="OpenRemoveModal">
+                                                <i class="bi bi-person-x"></i> Daireyi Boşalt
+                                            </button>
+                                        }
+                                    </div>
+
+                                    @if (isOwnFlat)
+                                    {
+                                        <button class="btn btn-sm btn-warning text-dark fw-bold w-100" @onclick="OpenSelfTransferModal">
+                                            <i class="bi bi-star-fill"></i> Yöneticiliği Devret
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-sm btn-warning text-dark fw-bold w-100" @onclick="OpenMakeAdminModal">
+                                            <i class="bi bi-star-fill"></i> Yönetici Yap (Devret)
+                                        </button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-8">
+                    <div class="card shadow-sm border-0 border-top border-info border-4 rounded-3">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                                <h5 class="fw-bold text-dark mb-0"><i class="bi bi-wallet2 me-2 text-info"></i>Aidat ve Borç Geçmişi</h5>
+                                <span class="badge bg-danger p-2 shadow-sm">Toplam Ödenmemiş: @flatPayments.Where(p => !p.IsPaid).Sum(p => p.Amount).ToString("C2")</span>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle bg-white">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Kategori</th>
+                                            <th>Açıklama</th>
+                                            <th>Son Ödeme</th>
+                                            <th>Tutar</th>
+                                            <th>Durum</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @if (!flatPayments.Any())
+                                        {
+                                            <tr>
+                                                <td colspan="5" class="text-center py-4 text-muted small">Bu daireye ait tanımlı bir borç kaydı bulunmuyor.</td>
+                                            </tr>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var pay in flatPayments)
+                                            {
+                                                <tr>
+                                                    <td class="fw-bold small">@pay.Category</td>
+                                                    <td class="text-truncate" style="max-width: 180px;">@pay.Description</td>
+                                                    <td class="small">@pay.DueDate.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                                                    <td class="fw-bold">@pay.Amount.ToString("C2")</td>
+                                                    <td>
+                                                        @if (pay.IsPaid)
+                                                        {
+                                                            <span class="badge bg-success-subtle text-success border border-success">
+                                                                <i class="bi bi-check-circle-fill me-1"></i> Ödendi
+                                                            </span>
+                                                            <div class="text-muted mt-1" style="font-size: 0.65rem;">
+                                                                @pay.PaidDate?.ToLocalTime().ToString("dd.MM.yyyy")
+                                                            </div>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="badge bg-danger-subtle text-danger border border-danger">
+                                                                <i class="bi bi-exclamation-circle-fill me-1"></i> Ödenmedi
+                                                            </span>
+                                                        }
+                                                    </td>
+                                                </tr>
+                                            }
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@* --- BİLGİLERİ GÜNCELLE MODAL --- *@
+@if (showEditModal)
+{
+    <div class="modal fade show d-block" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(3px);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-primary text-white border-0">
+                    <h5 class="modal-title fw-bold">Sakin Bilgilerini Güncelle</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="CloseEditModal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold small">Adı</label>
+                            <input @bind="editFirstName" class="form-control" />
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold small">Soyadı</label>
+                            <input @bind="editLastName" class="form-control" />
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Kullanıcı Adı</label>
+                        <input @bind="editUsername" class="form-control" />
+                    </div>
+                </div>
+                <div class="modal-footer border-0">
+                    <button class="btn btn-light" @onclick="CloseEditModal">İptal</button>
+                    <button class="btn btn-primary px-4 fw-bold" @onclick="SaveResidentInfo">Kaydet</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* --- BAŞKASININ DAİRESİNİ BOŞALT MODAL --- *@
+@if (showRemoveModal)
+{
+    <div class="modal fade show d-block" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(3px);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-danger text-white border-0">
+                    <h5 class="modal-title fw-bold">Daireyi Boşalt</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="CloseRemoveModal"></button>
+                </div>
+                <div class="modal-body p-4 text-center">
+                    <i class="bi bi-exclamation-triangle display-4 text-danger mb-3 d-block"></i>
+                    <p class="fs-5">Daireyi boşaltmak istediğinize emin misiniz?</p>
+                    <p class="text-muted small">Bu işlem, kullanıcının daireyle olan bağını koparır ancak borç geçmişi apartman kayıtlarında kalır.</p>
+                </div>
+                <div class="modal-footer border-0 justify-content-center">
+                    <button class="btn btn-light" @onclick="CloseRemoveModal">Vazgeç</button>
+                    <button class="btn btn-danger px-4 fw-bold" @onclick="RemoveResident">Evet, Daireyi Boşalt</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* --- BAŞKASINI YÖNETİCİ YAP MODAL --- *@
+@if (showMakeAdminModal)
+{
+    <div class="modal fade show d-block" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(3px);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-warning text-dark border-0">
+                    <h5 class="modal-title fw-bold">Yöneticiliği Devret</h5>
+                    <button type="button" class="btn-close" @onclick="CloseMakeAdminModal"></button>
+                </div>
+                <div class="modal-body p-4 text-center">
+                    <i class="bi bi-star-fill display-4 text-warning mb-3 d-block"></i>
+                    <p class="fs-5 fw-bold">Dikkat!</p>
+                    <p>Bu kişiyi yeni yönetici yaparsanız, <strong>sizin yönetici yetkileriniz alınacak</strong> ve sisteme normal bir sakin olarak devam edeceksiniz.</p>
+                    <p class="text-danger small fw-bold mt-2">Bu işlem geri alınamaz ve oturumunuz anında sonlandırılır.</p>
+                </div>
+                <div class="modal-footer border-0 justify-content-center">
+                    <button class="btn btn-light" @onclick="CloseMakeAdminModal">İptal</button>
+                    <button class="btn btn-warning px-4 fw-bold text-dark" @onclick="MakeResidentAdmin">Yetkilerimi Devret</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* --- KENDİ DAİRESİNİ BOŞALT & DEVRET MODAL --- *@
+@if (showSelfEvictModal)
+{
+    <div class="modal fade show d-block" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(3px);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-danger text-white border-0">
+                    <h5 class="modal-title fw-bold">Daireyi Boşalt ve Yetkiyi Devret</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="CloseSelfEvictModal"></button>
+                </div>
+                <div class="modal-body p-4 text-center">
+                    <i class="bi bi-box-arrow-right display-4 text-danger mb-3 d-block"></i>
+                    <p class="fw-bold">Kendi dairenizi boşaltıyorsunuz!</p>
+                    <p class="small text-muted">Apartmanın yöneticisiz kalmaması için öncelikle yetkilerinizi mevcut aktif bir sakine devretmeniz gerekmektedir.</p>
+
+                    @if (otherResidents.Count == 0)
+                    {
+                        <div class="alert alert-warning py-2 mt-3 small">
+                            <i class="bi bi-exclamation-circle me-1"></i> Apartmanda yetkiyi devredebileceğiniz kayıtlı başka bir sakin bulunmuyor. Önce sisteme yeni bir sakin eklemelisiniz.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="mt-3 text-start">
+                            <label class="form-label fw-bold small">Yeni Yöneticiyi Seçin</label>
+                            <select class="form-select" @bind="selectedNewAdminId">
+                                @foreach (var r in otherResidents)
+                                {
+                                    <option value="@r.Id">@r.FirstName @r.LastName (@r.Username)</option>
+                                }
+                            </select>
+                        </div>
+                        @if (!string.IsNullOrEmpty(transferError))
+                        {
+                            <div class="text-danger mt-2 small fw-bold">@transferError</div>
+                        }
+                    }
+                </div>
+                <div class="modal-footer border-0 justify-content-center">
+                    <button class="btn btn-light" @onclick="CloseSelfEvictModal">Vazgeç</button>
+                    <button class="btn btn-danger px-4 fw-bold" disabled="@(otherResidents.Count == 0)" @onclick="() => ExecuteSelfTransferAndEvict(true)">Devret ve Daireyi Boşalt</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* --- KENDİ YÖNETİCİLİĞİNİ DEVRET MODAL --- *@
+@if (showSelfTransferModal)
+{
+    <div class="modal fade show d-block" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(3px);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-warning text-dark border-0">
+                    <h5 class="modal-title fw-bold">Yöneticiliği Devret</h5>
+                    <button type="button" class="btn-close" @onclick="CloseSelfTransferModal"></button>
+                </div>
+                <div class="modal-body p-4 text-center">
+                    <i class="bi bi-star-half display-4 text-warning mb-3 d-block"></i>
+                    <p>Yöneticilik yetkilerinizi apartmandaki başka bir sakine devretmek üzeresiniz. Dairenizde <strong>sakin olarak kalmaya devam edeceksiniz.</strong></p>
+
+                    @if (otherResidents.Count == 0)
+                    {
+                        <div class="alert alert-danger py-2 mt-3 small">
+                            <i class="bi bi-exclamation-circle me-1"></i> Apartmanda yetkiyi devredebileceğiniz kayıtlı başka bir sakin bulunmuyor.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="mt-3 text-start">
+                            <label class="form-label fw-bold small">Yeni Yöneticiyi Seçin</label>
+                            <select class="form-select" @bind="selectedNewAdminId">
+                                @foreach (var r in otherResidents)
+                                {
+                                    <option value="@r.Id">@r.FirstName @r.LastName (@r.Username)</option>
+                                }
+                            </select>
+                        </div>
+                        @if (!string.IsNullOrEmpty(transferError))
+                        {
+                            <div class="text-danger mt-2 small fw-bold">@transferError</div>
+                        }
+                    }
+                </div>
+                <div class="modal-footer border-0 justify-content-center">
+                    <button class="btn btn-light" @onclick="CloseSelfTransferModal">Vazgeç</button>
+                    <button class="btn btn-warning px-4 fw-bold text-dark" disabled="@(otherResidents.Count == 0)" @onclick="() => ExecuteSelfTransferAndEvict(false)">Yetkilerimi Devret</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int? FlatId { get; set; }
+
+    [CascadingParameter] private Task<AuthenticationState> authState { get; set; } = null!;
+
+    private Flat? flat;
+    private User? resident;
+    private List<Payment> flatPayments = new();
+    private bool isLoading = false;
+
+    private int currentAdminId;
+    private bool isOwnFlat => resident != null && resident.Id == currentAdminId;
+
+    private int? searchFlatNumber;
+    private string? searchError;
+
+    // Modal kontrol değişkenleri
+    private bool showEditModal = false;
+    private bool showRemoveModal = false;
+    private bool showMakeAdminModal = false;
+
+    // Self-Action Modals
+    private bool showSelfEvictModal = false;
+    private bool showSelfTransferModal = false;
+    private List<User> otherResidents = new();
+    private int selectedNewAdminId;
+    private string? transferError;
+
+    // Düzenleme alanları
+    private string editFirstName = "";
+    private string editLastName = "";
+    private string editUsername = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await authState;
+        var userIdClaim = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (int.TryParse(userIdClaim, out int uid))
+        {
+            currentAdminId = uid;
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (FlatId.HasValue)
+        {
+            await LoadFlatDetails(FlatId.Value);
+        }
+    }
+
+    private async Task SearchFlat()
+    {
+        if (searchFlatNumber == null)
+        {
+            searchError = "Lütfen bir daire numarası girin.";
+            return;
+        }
+
+        searchError = null;
+
+        using var aptCtx = await AptCtxFactory.CreateDbContextAsync();
+        var currentApt = await aptCtx.Apartments.FirstOrDefaultAsync(a => a.AdminUserId == currentAdminId);
+
+        if (currentApt != null)
+        {
+            using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+            var targetFlat = await flatCtx.Flats.FirstOrDefaultAsync(f => f.ApartmentId == currentApt.Id && f.FlatNumber == searchFlatNumber);
+
+            if (targetFlat != null)
+            {
+                NavManager.NavigateTo($"/admin/flat-inquiry/{targetFlat.Id}");
+            }
+            else
+            {
+                searchError = $"{searchFlatNumber} numaralı daire sistemde bulunamadı.";
+            }
+        }
+    }
+
+    private async Task HandleKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SearchFlat();
+        }
+    }
+
+    private async Task LoadFlatDetails(int id)
+    {
+        try
+        {
+            isLoading = true;
+
+            using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+            flat = await flatCtx.Flats.AsNoTracking().FirstOrDefaultAsync(f => f.Id == id);
+
+            if (flat != null)
+            {
+                if (flat.ResidentUserId.HasValue)
+                {
+                    using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+                    resident = await userCtx.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == flat.ResidentUserId.Value);
+                }
+                else
+                {
+                    resident = null;
+                }
+
+                using var payCtx = await PaymentCtxFactory.CreateDbContextAsync();
+                flatPayments = await payCtx.Payments
+                    .AsNoTracking()
+                    .Where(p => p.FlatId == id)
+                    .OrderByDescending(p => p.DueDate)
+                    .ToListAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Daire sorgulama hatası: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    // --- DİĞER SAKİNLERİ YÜKLE (KENDİ DAİRESİ İŞLEMLERİ İÇİN) ---
+    private async Task LoadOtherResidents()
+    {
+        transferError = null;
+        using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+        using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+
+        if (flat != null)
+        {
+            // Bu apartmandaki DOLU olan ve yöneticinin KENDİSİ OLMAYAN dairelerin id'leri
+            var otherResidentIds = await flatCtx.Flats
+                .Where(f => f.ApartmentId == flat.ApartmentId && f.ResidentUserId.HasValue && f.ResidentUserId.Value != currentAdminId)
+                .Select(f => f.ResidentUserId!.Value)
+                .ToListAsync();
+
+            otherResidents = await userCtx.Users
+                .Where(u => otherResidentIds.Contains(u.Id))
+                .ToListAsync();
+
+            if (otherResidents.Any())
+            {
+                selectedNewAdminId = otherResidents.First().Id;
+            }
+            else
+            {
+                selectedNewAdminId = 0;
+            }
+        }
+    }
+
+    // --- BİLGİ GÜNCELLEME İŞLEMLERİ ---
+    private void OpenEditModal()
+    {
+        if (resident != null)
+        {
+            editFirstName = resident.FirstName;
+            editLastName = resident.LastName;
+            editUsername = resident.Username;
+            showEditModal = true;
+        }
+    }
+    private void CloseEditModal() => showEditModal = false;
+
+    private async Task SaveResidentInfo()
+    {
+        if (string.IsNullOrWhiteSpace(editFirstName) || string.IsNullOrWhiteSpace(editLastName) || string.IsNullOrWhiteSpace(editUsername))
+            return;
+
+        try
+        {
+            using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+            var targetUser = await userCtx.Users.FindAsync(resident!.Id);
+
+            if (targetUser != null)
+            {
+                targetUser.FirstName = editFirstName;
+                targetUser.LastName = editLastName;
+                targetUser.Username = editUsername;
+                await userCtx.SaveChangesAsync();
+            }
+
+            // Eğer yönetici kendi bilgilerini güncelliyorsa oturumu yenile
+            if (isOwnFlat && AuthStateProvider is CustomAuthStateProvider customProvider)
+            {
+                await customProvider.UpdateAuthenticationState(new UserSession
+                {
+                    Id = targetUser!.Id,
+                    Username = targetUser.Username,
+                    Role = targetUser.Role
+                });
+            }
+
+            showEditModal = false;
+            await LoadFlatDetails(FlatId!.Value);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Güncelleme hatası: {ex.Message}");
+        }
+    }
+
+    // --- BAŞKASININ DAİRESİNİ BOŞALTMA İŞLEMLERİ ---
+    private void OpenRemoveModal() => showRemoveModal = true;
+    private void CloseRemoveModal() => showRemoveModal = false;
+
+    private async Task RemoveResident()
+    {
+        try
+        {
+            using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+            var targetFlat = await flatCtx.Flats.FindAsync(flat!.Id);
+
+            if (targetFlat != null)
+            {
+                targetFlat.ResidentUserId = null;
+                await flatCtx.SaveChangesAsync();
+            }
+
+            showRemoveModal = false;
+            await LoadFlatDetails(FlatId!.Value);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Kaldırma hatası: {ex.Message}");
+        }
+    }
+
+    // --- BAŞKASINA YÖNETİCİLİK DEVRET İŞLEMLERİ ---
+    private void OpenMakeAdminModal() => showMakeAdminModal = true;
+    private void CloseMakeAdminModal() => showMakeAdminModal = false;
+
+    private async Task MakeResidentAdmin()
+    {
+        try
+        {
+            using var aptCtx = await AptCtxFactory.CreateDbContextAsync();
+            var apt = await aptCtx.Apartments.FirstOrDefaultAsync(a => a.AdminUserId == currentAdminId && a.Id == flat!.ApartmentId);
+
+            if (apt != null && resident != null)
+            {
+                apt.AdminUserId = resident.Id;
+                await aptCtx.SaveChangesAsync();
+
+                using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+                var newAdmin = await userCtx.Users.FindAsync(resident.Id);
+                if (newAdmin != null) newAdmin.Role = "Admin";
+
+                var oldAdmin = await userCtx.Users.FindAsync(currentAdminId);
+                if (oldAdmin != null && oldAdmin.Role == "Admin") oldAdmin.Role = "Resident";
+
+                await userCtx.SaveChangesAsync();
+
+                if (AuthStateProvider is CustomAuthStateProvider customProvider)
+                {
+                    await customProvider.UpdateAuthenticationState(null);
+                }
+                NavManager.NavigateTo("/login", forceLoad: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Devir işlemi hatası: {ex.Message}");
+        }
+    }
+
+    // --- KENDİ DAİRESİNİ BOŞALT / KENDİ YÖNETİCİLİĞİNİ DEVRET ---
+    private async Task OpenSelfEvictModal()
+    {
+        await LoadOtherResidents();
+        showSelfEvictModal = true;
+    }
+    private void CloseSelfEvictModal() => showSelfEvictModal = false;
+
+    private async Task OpenSelfTransferModal()
+    {
+        await LoadOtherResidents();
+        showSelfTransferModal = true;
+    }
+    private void CloseSelfTransferModal() => showSelfTransferModal = false;
+
+    // Bu metod hem sadece devretmek, hem de devredip daireyi boşaltmak için kullanılır
+    private async Task ExecuteSelfTransferAndEvict(bool evictFlat)
+    {
+        if (selectedNewAdminId == 0)
+        {
+            transferError = "Lütfen devredilecek geçerli bir kişi seçin.";
+            return;
+        }
+
+        try
+        {
+            using var aptCtx = await AptCtxFactory.CreateDbContextAsync();
+            var apt = await aptCtx.Apartments.FirstOrDefaultAsync(a => a.AdminUserId == currentAdminId && a.Id == flat!.ApartmentId);
+
+            if (apt != null)
+            {
+                // 1. Apartman yönetimini yeni kişiye ata
+                apt.AdminUserId = selectedNewAdminId;
+                await aptCtx.SaveChangesAsync();
+
+                // 2. Rolleri değiştir
+                using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+                var newAdmin = await userCtx.Users.FindAsync(selectedNewAdminId);
+                if (newAdmin != null) newAdmin.Role = "Admin";
+
+                var oldAdmin = await userCtx.Users.FindAsync(currentAdminId);
+                if (oldAdmin != null && oldAdmin.Role == "Admin") oldAdmin.Role = "Resident";
+
+                await userCtx.SaveChangesAsync();
+
+                // 3. Eğer kişi daireyi boşaltıyorsa, Flat kaydını temizle
+                if (evictFlat)
+                {
+                    using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+                    var targetFlat = await flatCtx.Flats.FindAsync(flat!.Id);
+                    if (targetFlat != null)
+                    {
+                        targetFlat.ResidentUserId = null;
+                        await flatCtx.SaveChangesAsync();
+                    }
+                }
+
+                // 4. Yetkisi kalmadığı için sistemi çıkışa zorla
+                if (AuthStateProvider is CustomAuthStateProvider customProvider)
+                {
+                    await customProvider.UpdateAuthenticationState(null);
+                }
+                NavManager.NavigateTo("/login", forceLoad: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            transferError = $"İşlem başarısız oldu: {ex.Message}";
+        }
+    }
+}

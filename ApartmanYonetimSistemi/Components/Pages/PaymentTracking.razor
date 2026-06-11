@@ -31,7 +31,7 @@
             </div>
         </div>
         <div class="card-body">
-            
+
             <div class="row mb-4">
                 <div class="col-md-4">
                     <label class="small fw-bold">Daireye Göre Filtrele</label>
@@ -101,18 +101,18 @@
                                 <td class="small">@item.Description</td>
                                 <td class="fw-bold text-primary">@item.Amount.ToString("C2")</td>
 
-                                
-                                <td class="small text-muted">@item.CreatedDate.ToString("dd.MM.yyyy HH:mm")</td>
+                                @* DİKKAT: ToLocalTime() eklendi *@
+                                <td class="small text-muted">@item.CreatedDate.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
 
-                                
+                                @* DİKKAT: ToLocalTime() eklendi ve MaxValue kontrolü Year == 9999 ile güncellendi *@
                                 <td class="small fw-bold">
-                                    @if (item.DueDate == DateTime.MaxValue)
+                                    @if (item.DueDate.Year == 9999)
                                     {
                                         <span class="text-muted italic">Süresiz</span>
                                     }
                                     else
                                     {
-                                        @item.DueDate.ToString("dd.MM.yyyy HH:mm")
+                                        @item.DueDate.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
                                     }
                                 </td>
 
@@ -122,7 +122,8 @@
                                         <span class="badge bg-success">
                                             <i class="bi bi-check-circle me-1"></i> Ödendi
                                         </span>
-                                        <div style="font-size: 0.7rem;" class="text-muted">@item.PaidDate?.ToString("dd.MM.yyyy HH:mm")</div>
+                                        @* DİKKAT: ToLocalTime() eklendi *@
+                                        <div style="font-size: 0.7rem;" class="text-muted">@item.PaidDate?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</div>
                                     }
                                     else
                                     {
@@ -208,7 +209,8 @@
         if (payment != null)
         {
             payment.IsPaid = true;
-            payment.PaidDate = DateTime.Now;
+            // DİKKAT: DateTime.Now yerine DateTime.UtcNow kullanıldı
+            payment.PaidDate = DateTime.UtcNow;
             await payCtx.SaveChangesAsync();
             await LoadPayments();
         }

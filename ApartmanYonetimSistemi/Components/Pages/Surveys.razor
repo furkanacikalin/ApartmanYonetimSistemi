@@ -1,0 +1,259 @@
+﻿@page "/surveys"
+@attribute [Authorize(Roles = "Resident")]
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<SurveyContext> SurveyCtxFactory
+@inject IDbContextFactory<FlatContext> FlatCtxFactory
+
+<div class="container mt-4 mb-5">
+    <div class="d-flex align-items-center mb-4">
+        <h3 class="fw-bold mb-0"><i class="bi bi-ui-radios text-primary me-2"></i>Apartman Anketleri</h3>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+        </div>
+    }
+    else if (surveys == null || !surveys.Any())
+    {
+        <div class="text-center p-5 bg-white shadow-sm rounded-4 border-0">
+            <i class="bi bi-inbox display-1 text-light"></i>
+            <p class="text-muted mt-3">Şu an için katılabileceğiniz veya yayınlanmış bir anket bulunmuyor.</p>
+        </div>
+    }
+    else
+    {
+        <div class="row g-4">
+            @foreach (var survey in surveys)
+            {
+                // Anket durumunu ve kullanıcının oy kullanıp kullanmadığını tespit et
+                bool isExpired = survey.DueDate < DateTime.UtcNow;
+                bool hasVoted = survey.Options.Any(o => o.Votes.Any(v => v.ResidentUserId == currentUserId));
+                int totalVotes = survey.Options.Sum(o => o.Votes.Count);
+
+                <div class="col-md-6">
+                    <div class="card h-100 shadow-sm border-0 border-top @(isExpired ? "border-secondary border-4" : "border-primary border-4") rounded-3">
+                        <div class="card-body p-4">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h5 class="fw-bold text-dark mb-0">@survey.Title</h5>
+                                @if (isExpired)
+                                {
+                                    <span class="badge bg-secondary">Süresi Doldu</span>
+                                }
+                                else if (hasVoted)
+                                {
+                                    <span class="badge bg-info text-dark">Oy Kullanıldı</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-success shadow-sm">Aktif</span>
+                                }
+                            </div>
+                            <p class="text-secondary small text-muted mb-3" style="min-height: 40px;">@survey.Description</p>
+
+                            <div class="d-flex justify-content-between align-items-center text-muted small mb-4 border-bottom pb-2">
+                                <span><i class="bi bi-calendar-event me-1"></i> Bitiş: @survey.DueDate.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                                <span class="fw-bold text-dark"><i class="bi bi-people me-1"></i> Katılım: @totalVotes Kişi</span>
+                            </div>
+
+                            @* EĞER OY KULLANILDIYSA VEYA SÜRE BİTTİYSE: SONUÇLARI GÖSTER *@
+                            @if (hasVoted || isExpired)
+                            {
+                                <div class="d-flex flex-column gap-3">
+                                    @foreach (var option in survey.Options)
+                                    {
+                                        var voteCount = option.Votes.Count;
+                                        var percentage = totalVotes == 0 ? 0 : Math.Round((double)voteCount / totalVotes * 100, 1);
+                                        var didIVoteForThis = option.Votes.Any(v => v.ResidentUserId == currentUserId);
+
+                                        <div>
+                                            <div class="d-flex justify-content-between small mb-1 align-items-center">
+                                                <span class="text-dark @(didIVoteForThis ? "fw-bold text-primary" : "fw-semibold")">
+                                                    @option.OptionText
+                                                    @if (didIVoteForThis)
+                                                    {
+                                                        <i class="bi bi-check-circle-fill text-primary ms-1" title="Sizin Seçiminiz"></i>
+                                                    }
+                                                </span>
+                                                <span class="text-muted">%@percentage (@voteCount)</span>
+                                            </div>
+                                            <div class="progress" style="height: 10px;">
+                                                <div class="progress-bar @(didIVoteForThis ? "bg-primary progress-bar-striped" : (isExpired ? "bg-secondary" : "bg-info opacity-75"))"
+                                                     role="progressbar"
+                                                     style="width: @percentage%"></div>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                            @* EĞER OY KULLANILMADIYSA VE AKTİFSE: OY KULLANMA EKRANINI GÖSTER *@
+                            else
+                            {
+                                <div class="d-flex flex-column gap-2 mb-3">
+                                    @foreach (var option in survey.Options)
+                                    {
+                                        <div class="form-check p-3 bg-light rounded border border-light" style="cursor:pointer;" @onclick="() => SelectOption(survey.Id, option.Id)">
+                                            <input class="form-check-input ms-1" type="radio" name="survey_@survey.Id" id="opt_@option.Id"
+                                                   checked="@(selectedOptions.ContainsKey(survey.Id) && selectedOptions[survey.Id] == option.Id)"
+                                                   @onchange="() => SelectOption(survey.Id, option.Id)" />
+                                            <label class="form-check-label ms-2 fw-semibold text-dark w-100" for="opt_@option.Id" style="cursor:pointer;">
+                                                @option.OptionText
+                                            </label>
+                                        </div>
+                                    }
+                                </div>
+
+                                @if (actionErrorSurveyId == survey.Id && !string.IsNullOrEmpty(actionError))
+                                {
+                                    <div class="text-danger small fw-bold mb-2"><i class="bi bi-exclamation-circle me-1"></i>@actionError</div>
+                                }
+
+                                <button class="btn btn-primary w-100 fw-bold shadow-sm" @onclick="() => SubmitVote(survey.Id)" disabled="@isSubmitting">
+                                    @if (isSubmitting && actionErrorSurveyId == survey.Id)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-2"></span>
+                        
+                                        <span>Oyunuz İletiliyor...</span>
+                                    }
+                                    else
+                                    {
+                                        <i class="bi bi-send-check me-1"></i>
+                        
+                                        <span>Oyumu Gönder</span>
+                                    }
+                                </button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> authState { get; set; } = null!;
+
+    private List<Survey> surveys = new();
+    private int currentUserId;
+    private int currentApartmentId;
+    private bool isLoading = true;
+
+    // Oy kullanma işlemleri için takip sözlüğü (SurveyId -> OptionId)
+    private Dictionary<int, int> selectedOptions = new();
+    private bool isSubmitting = false;
+    private string? actionError;
+    private int? actionErrorSurveyId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await authState;
+        var userIdClaim = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        if (int.TryParse(userIdClaim, out int userId))
+        {
+            currentUserId = userId;
+
+            // Sakinin hangi apartmanda oturduğunu Flat tablosundan bul
+            using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+            var myFlat = await flatCtx.Flats.AsNoTracking().FirstOrDefaultAsync(f => f.ResidentUserId == currentUserId);
+
+            if (myFlat != null)
+            {
+                currentApartmentId = myFlat.ApartmentId;
+                await LoadSurveys();
+            }
+        }
+    }
+
+    private async Task LoadSurveys()
+    {
+        try
+        {
+            isLoading = true;
+            using var ctx = await SurveyCtxFactory.CreateDbContextAsync();
+
+            surveys = await ctx.Surveys
+                .Include(s => s.Options)
+                    .ThenInclude(o => o.Votes)
+                .Where(s => s.ApartmentId == currentApartmentId)
+                .OrderByDescending(s => s.CreatedDate)
+                .AsNoTracking() // Sadece okuma yaptığımız için performansı artırır
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Anketler yüklenirken hata oluştu: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void SelectOption(int surveyId, int optionId)
+    {
+        selectedOptions[surveyId] = optionId;
+        actionError = null;
+        actionErrorSurveyId = null;
+    }
+
+    private async Task SubmitVote(int surveyId)
+    {
+        actionErrorSurveyId = surveyId;
+
+        if (!selectedOptions.ContainsKey(surveyId))
+        {
+            actionError = "Lütfen oy göndermeden önce bir seçenek işaretleyin.";
+            return;
+        }
+
+        try
+        {
+            isSubmitting = true;
+            actionError = null;
+
+            int selectedOptionId = selectedOptions[surveyId];
+
+            using var ctx = await SurveyCtxFactory.CreateDbContextAsync();
+
+            // Güvenlik Kontrolü: Bu ankete bu kullanıcı daha önce oy vermiş mi? (Çift sekme veya hızlı tıklama koruması)
+            bool alreadyVoted = await ctx.SurveyVotes.AnyAsync(v => v.SurveyId == surveyId && v.ResidentUserId == currentUserId);
+            if (alreadyVoted)
+            {
+                actionError = "Bu ankette zaten oy kullanmışsınız.";
+                return;
+            }
+
+            var newVote = new SurveyVote
+            {
+                SurveyId = surveyId,
+                SurveyOptionId = selectedOptionId,
+                ResidentUserId = currentUserId,
+                VotedAt = DateTime.UtcNow
+            };
+
+            ctx.SurveyVotes.Add(newVote);
+            await ctx.SaveChangesAsync();
+
+            // Ekranı güncellemek için anketleri yeniden yükle
+            await LoadSurveys();
+        }
+        catch (Exception ex)
+        {
+            actionError = "Oyunuz kaydedilirken bir sorun oluştu.";
+            Console.WriteLine(ex.Message);
+        }
+        finally
+        {
+            isSubmitting = false;
+        }
+    }
+}

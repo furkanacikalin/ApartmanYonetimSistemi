@@ -1,0 +1,337 @@
+﻿@page "/admin/surveys"
+@attribute [Authorize(Roles = "Admin")]
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<SurveyContext> SurveyCtxFactory
+@inject IDbContextFactory<ApartmentContext> AptCtxFactory
+@inject IDbContextFactory<AnnouncementContext> AnnCtxFactory 
+@inject AuthenticationStateProvider AuthStateProvider
+
+<div class="container mt-4 mb-5">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3 class="fw-bold mb-0"><i class="bi bi-bar-chart-line text-primary me-2"></i>Anket Yönetimi</h3>
+        <button class="btn btn-primary shadow-sm fw-bold" @onclick="OpenCreateModal">
+            <i class="bi bi-plus-circle me-2"></i><span>Yeni Anket Oluştur</span>
+        </button>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+        </div>
+    }
+    else if (surveys == null || !surveys.Any())
+    {
+        <div class="text-center p-5 bg-white shadow-sm rounded-4 border-0">
+            <i class="bi bi-card-list display-1 text-light"></i>
+            <p class="text-muted mt-3">Henüz yayınlanmış bir anket bulunmuyor.</p>
+        </div>
+    }
+    else
+    {
+        <div class="row g-4">
+            @foreach (var survey in surveys)
+            {
+                var totalVotes = survey.Options.Sum(o => o.Votes.Count);
+                var isExpired = survey.DueDate < DateTime.UtcNow;
+
+                <div class="col-md-6">
+                    <div class="card h-100 shadow-sm border-0 border-top @(isExpired ? "border-secondary border-4" : "border-primary border-4") rounded-3">
+                        <div class="card-body p-4">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h5 class="fw-bold text-dark mb-0 text-truncate" style="max-width: 75%;">@survey.Title</h5>
+                                @if (isExpired)
+                                {
+                                    <span class="badge bg-secondary">Süresi Doldu</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-success">Aktif</span>
+                                }
+                            </div>
+                            <p class="text-secondary small text-muted text-wrap mb-3" style="min-height: 40px;">@survey.Description</p>
+
+                            <div class="d-flex justify-content-between align-items-center text-muted small mb-3 border-bottom pb-2">
+                                <span><i class="bi bi-calendar-event me-1"></i> Son Gün: @survey.DueDate.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                                <span class="fw-bold text-dark"><i class="bi bi-people me-1"></i> Toplam: @totalVotes Oy</span>
+                            </div>
+
+                            <div class="d-flex flex-column gap-3">
+                                @foreach (var option in survey.Options)
+                                {
+                                    var voteCount = option.Votes.Count;
+                                    var percentage = totalVotes == 0 ? 0 : Math.Round((double)voteCount / totalVotes * 100, 1);
+
+                                    <div>
+                                        <div class="d-flex justify-content-between small mb-1">
+                                            <span class="text-dark fw-semibold">@option.OptionText</span>
+                                            <span class="text-muted">%@percentage (@voteCount Oy)</span>
+                                        </div>
+                                        <div class="progress" style="height: 8px;">
+                                            <div class="progress-bar @(isExpired ? "bg-secondary" : "bg-primary")" 
+                                                 role="progressbar" 
+                                                 style="width: @percentage%"></div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                        <div class="card-footer bg-transparent border-0 pb-3 d-flex justify-content-end">
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteSurvey(survey.Id)">
+                                <i class="bi bi-trash me-1"></i><span>Anketi Sil</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@* --- YENİ ANKET OLUŞTURMA MODAL --- *@
+@if (showCreateModal)
+{
+    <div class="modal fade show d-block" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(3px);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-primary text-white border-0">
+                    <h5 class="modal-title fw-bold">Yeni Anket Yayınla</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="CloseCreateModal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Anket Sorusu / Başlık</label>
+                        <input type="text" class="form-control" @bind="newSurvey.Title" placeholder="Örn: Dış cephe boyası hangi renk olmalı?" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Açıklama</label>
+                        <textarea class="form-control" rows="2" @bind="newSurvey.Description" placeholder="Anket amacını kısaca açıklayın..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Kapanış Tarihi</label>
+                        <input type="datetime-local" class="form-control" @bind="localDueDate" />
+                    </div>
+
+                    <div class="p-3 bg-light rounded border border-light mt-4">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6 class="fw-bold text-dark mb-0">Cevap Seçenekleri</h6>
+                            <button type="button" class="btn btn-sm btn-outline-success border-0" @onclick="AddOption">
+                                <i class="bi bi-plus-circle-fill"></i> Seçenek Ekle
+                            </button>
+                        </div>
+
+                        @for (int i = 0; i < optionTexts.Count; i++)
+                        {
+                            var index = i;
+                            <div class="input-group mb-2 shadow-sm rounded">
+                                <span class="input-group-text bg-white border-end-0 text-muted small">@(index + 1).</span>
+                                <input type="text" class="form-control border-start-0" 
+                                       placeholder="Seçenek yazın..." 
+                                       @bind="optionTexts[index]" />
+                                @if (optionTexts.Count > 2)
+                                {
+                                    <button class="btn btn-outline-danger" type="button" @onclick="() => RemoveOption(index)">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(modalError))
+                    {
+                        <div class="alert alert-danger py-2 mt-3 small fw-bold">
+                            <i class="bi bi-exclamation-triangle-fill me-1"></i> @modalError
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer border-0">
+                    <button class="btn btn-light" @onclick="CloseCreateModal">İptal</button>
+                    <button class="btn btn-primary px-4 fw-bold" @onclick="SaveSurvey" disabled="@isSaving">
+                        @if (isSaving)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" role="status"></span><span>Kaydediliyor...</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-check-lg me-1"></i><span>Anketi Yayınla</span>
+                        }
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> authState { get; set; } = null!;
+
+    private List<Survey> surveys = new();
+    private int currentApartmentId;
+    private bool isLoading = true;
+
+    // Modal Form Değişkenleri
+    private bool showCreateModal = false;
+    private bool isSaving = false;
+    private Survey newSurvey = new();
+    private DateTime localDueDate = DateTime.Now.AddDays(7); 
+    private List<string> optionTexts = new();
+    private string? modalError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await authState;
+        var userIdClaim = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        if (int.TryParse(userIdClaim, out int userId))
+        {
+            using var aptCtx = await AptCtxFactory.CreateDbContextAsync();
+            var apt = await aptCtx.Apartments.AsNoTracking().FirstOrDefaultAsync(a => a.AdminUserId == userId);
+
+            if (apt != null)
+            {
+                currentApartmentId = apt.Id;
+                await LoadSurveys();
+            }
+        }
+    }
+
+    private async Task LoadSurveys()
+    {
+        try
+        {
+            isLoading = true;
+            using var ctx = await SurveyCtxFactory.CreateDbContextAsync();
+
+            surveys = await ctx.Surveys
+                .Include(s => s.Options)
+                    .ThenInclude(o => o.Votes)
+                .Where(s => s.ApartmentId == currentApartmentId)
+                .OrderByDescending(s => s.CreatedDate)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Anket yükleme hatası: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void OpenCreateModal()
+    {
+        newSurvey = new Survey();
+        localDueDate = DateTime.Now.AddDays(7);
+        optionTexts = new List<string> { "", "" }; 
+        modalError = null;
+        showCreateModal = true;
+    }
+
+    private void CloseCreateModal() => showCreateModal = false;
+
+    private void AddOption() => optionTexts.Add("");
+
+    private void RemoveOption(int index)
+    {
+        if (optionTexts.Count > 2)
+        {
+            optionTexts.RemoveAt(index);
+        }
+    }
+
+    private async Task SaveSurvey()
+    {
+        if (string.IsNullOrWhiteSpace(newSurvey.Title))
+        {
+            modalError = "Lütfen anket sorusunu/başlığını girin.";
+            return;
+        }
+
+        var filteredOptions = optionTexts.Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
+        if (filteredOptions.Count < 2)
+        {
+            modalError = "Anket için en az 2 adet geçerli seçenek doldurmalısınız.";
+            return;
+        }
+
+        try
+        {
+            isSaving = true;
+            modalError = null;
+
+            using var ctx = await SurveyCtxFactory.CreateDbContextAsync();
+
+            newSurvey.ApartmentId = currentApartmentId;
+            newSurvey.CreatedDate = DateTime.UtcNow;
+            newSurvey.DueDate = localDueDate.ToUniversalTime();
+            newSurvey.IsActive = true;
+
+            foreach (var text in filteredOptions)
+            {
+                newSurvey.Options.Add(new SurveyOption { OptionText = text });
+            }
+
+            ctx.Surveys.Add(newSurvey);
+            await ctx.SaveChangesAsync();
+
+            // --- OTOMATİK DUYURU OLUŞTURMA BLOĞU ---
+            try
+            {
+                using var annCtx = await AnnCtxFactory.CreateDbContextAsync();
+                var autoAnnouncement = new Announcement
+                {
+                    ApartmentId = currentApartmentId,
+                    Title = "Yeni Anket Yayınlandı: " + newSurvey.Title,
+                    Content = $"Sol menüdeki 'Anketler' kısmından ulaşabilirsiniz.",
+                    CreatedDate = DateTime.UtcNow
+                };
+                annCtx.Announcements.Add(autoAnnouncement);
+                await annCtx.SaveChangesAsync();
+            }
+            catch (Exception annEx)
+            {
+                // Duyuru hata verse bile anket kaydedildiği için kullanıcıya hissettirmeden konsola logluyoruz.
+                Console.WriteLine($"Otomatik duyuru oluşturulurken hata: {annEx.Message}");
+            }
+            // ---------------------------------------
+
+            showCreateModal = false;
+            await LoadSurveys();
+        }
+        catch (Exception ex)
+        {
+            modalError = $"Hata: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private async Task DeleteSurvey(int id)
+    {
+        try
+        {
+            using var ctx = await SurveyCtxFactory.CreateDbContextAsync();
+            var target = await ctx.Surveys.FindAsync(id);
+            if (target != null)
+            {
+                ctx.Surveys.Remove(target);
+                await ctx.SaveChangesAsync();
+                await LoadSurveys();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Anket silme hatası: {ex.Message}");
+        }
+    }
+}

@@ -22,13 +22,7 @@ public class CustomAuthStateProvider : AuthenticationStateProvider
             var userSession = await _localStorage.GetItemAsync<UserSession>("UserSession");
             if (userSession == null) return new AuthenticationState(_anonymous);
 
-            var claimsPrincipal = new ClaimsPrincipal(new ClaimsIdentity(new[]
-            {
-                new Claim(ClaimTypes.NameIdentifier, userSession.Id.ToString()),
-                new Claim(ClaimTypes.Name, userSession.Username),
-                new Claim(ClaimTypes.Role, userSession.Role)
-            }, "CustomAuth"));
-
+            var claimsPrincipal = CreateClaimsPrincipal(userSession);
             return new AuthenticationState(claimsPrincipal);
         }
         catch
@@ -44,12 +38,7 @@ public class CustomAuthStateProvider : AuthenticationStateProvider
         if (userSession != null)
         {
             await _localStorage.SetItemAsync("UserSession", userSession);
-            claimsPrincipal = new ClaimsPrincipal(new ClaimsIdentity(new[]
-            {
-                new Claim(ClaimTypes.NameIdentifier, userSession.Id.ToString()),
-                new Claim(ClaimTypes.Name, userSession.Username),
-                new Claim(ClaimTypes.Role, userSession.Role)
-            }, "CustomAuth"));
+            claimsPrincipal = CreateClaimsPrincipal(userSession);
         }
         else
         {
@@ -58,5 +47,17 @@ public class CustomAuthStateProvider : AuthenticationStateProvider
         }
 
         NotifyAuthenticationStateChanged(Task.FromResult(new AuthenticationState(claimsPrincipal)));
+    }
+
+    private ClaimsPrincipal CreateClaimsPrincipal(UserSession userSession)
+    {
+        var identity = new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, userSession.Id.ToString()),
+            new Claim(ClaimTypes.Name, userSession.Username),
+            new Claim(ClaimTypes.Role, userSession.Role)
+        }, "CustomAuth");
+
+        return new ClaimsPrincipal(identity);
     }
 }

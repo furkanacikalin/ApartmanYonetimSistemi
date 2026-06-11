@@ -1,0 +1,353 @@
+﻿@page "/admin/budget"
+@attribute [Authorize(Roles = "Admin")]
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@using System.IO
+@inject IDbContextFactory<BudgetContext> BudgetCtxFactory
+@inject IDbContextFactory<ApartmentContext> AptCtxFactory
+@inject IDbContextFactory<AnnouncementContext> AnnCtxFactory
+@inject IWebHostEnvironment Environment
+@inject AuthenticationStateProvider AuthStateProvider
+
+<div class="container mt-4 mb-5">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3 class="fw-bold mb-0"><i class="bi bi-safe text-primary me-2"></i>Bütçe ve Harcama Yönetimi</h3>
+        <div class="d-flex gap-2">
+            <button class="btn btn-success shadow-sm fw-bold" @onclick='() => OpenModal("Income")'>
+                <i class="bi bi-plus-circle me-1"></i><span>Gelir Ekle</span>
+            </button>
+            <button class="btn btn-danger shadow-sm fw-bold" @onclick='() => OpenModal("Expense")'>
+                <i class="bi bi-cart-dash me-1"></i><span>Harcama Ekle</span>
+            </button>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary" role="status"></div></div>
+    }
+    else
+    {
+        <div class="row g-4 mb-4">
+            <div class="col-md-4">
+                <div class="card shadow-sm border-0 border-start border-success border-5 h-100 bg-white">
+                    <div class="card-body">
+                        <p class="text-muted text-uppercase small fw-bold mb-1">Toplam Kasa Girişi</p>
+                        <h3 class="text-success fw-bold mb-0">@totalIncome.ToString("C2")</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card shadow-sm border-0 border-start border-danger border-5 h-100 bg-white">
+                    <div class="card-body">
+                        <p class="text-muted text-uppercase small fw-bold mb-1">Toplam Harcama (Çıkış)</p>
+                        <h3 class="text-danger fw-bold mb-0">@totalExpense.ToString("C2")</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card shadow-sm border-0 bg-primary text-white h-100">
+                    <div class="card-body d-flex flex-column justify-content-center">
+                        <p class="text-white-50 text-uppercase small fw-bold mb-1">Mevcut Kasa (Net Bütçe)</p>
+                        <h2 class="text-white fw-bold mb-0">@currentBudget.ToString("C2")</h2>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm border-0 rounded-3 overflow-hidden">
+            <div class="card-header bg-white border-bottom py-3">
+                <h5 class="fw-bold mb-0 text-dark"><i class="bi bi-list-columns-reverse me-2"></i>Kasa Hareketleri</h5>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0 bg-white">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Tarih</th>
+                            <th>Tür</th>
+                            <th>Açıklama</th>
+                            <th>Belge/Fiş</th>
+                            <th class="text-end">Tutar</th>
+                            <th class="text-end">İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (!transactions.Any())
+                        {
+                            <tr><td colspan="6" class="text-center py-4 text-muted">Henüz kasa hareketi bulunmuyor.</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var tr in transactions)
+                            {
+                                <tr>
+                                    <td class="small">@tr.Date.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td>
+                                        @if (tr.TransactionType == "Income")
+                                        {
+                                            <span class="badge bg-success-subtle text-success border border-success">Gelir</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-danger-subtle text-danger border border-danger">Gider</span>
+                                        }
+                                    </td>
+                                    <td class="text-wrap" style="max-width: 250px;">@tr.Description</td>
+                                    <td>
+                                        @if (!string.IsNullOrEmpty(tr.ReceiptUrl))
+                                        {
+                                            <a href="uploads/announcements/@tr.ReceiptUrl" target="_blank" class="btn btn-sm btn-outline-secondary" title="Belgeyi Gör">
+                                                <i class="bi bi-file-earmark-text"></i> Belge
+                                            </a>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted small">-</span>
+                                        }
+                                    </td>
+                                    <td class="text-end fw-bold @(tr.TransactionType == "Income" ? "text-success" : "text-danger")">
+                                        @(tr.TransactionType == "Income" ? "+" : "-") @tr.Amount.ToString("C2")
+                                    </td>
+                                    <td class="text-end">
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteTransaction(tr.Id)" title="Sil">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+@* --- İŞLEM EKLEME MODALI --- *@
+@if (showModal)
+{
+    <div class="modal fade show d-block" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(3px);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header @(modalType == "Income" ? "bg-success" : "bg-danger") text-white border-0">
+                    <h5 class="modal-title fw-bold">@(modalType == "Income" ? "Kasa Geliri Ekle" : "Harcama Ekle")</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Tutar (₺)</label>
+                        <input type="number" class="form-control form-control-lg fw-bold" @bind="newTransaction.Amount" min="0.01" step="0.01" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Açıklama</label>
+                        <textarea class="form-control" rows="3" @bind="newTransaction.Description" placeholder="@(modalType == "Income" ? "Örn: Asansör firması iadesi, Ek bağış vb." : "Örn: Ortak alan temizlik malzemesi, asansör bakımı vb.")"></textarea>
+                    </div>
+
+                    @if (modalType == "Expense")
+                    {
+                        <div class="mb-3 p-3 bg-light rounded border border-light">
+                            <label class="form-label fw-bold small text-dark"><i class="bi bi-receipt me-1"></i>Fatura / Fiş Görseli</label>
+                            <InputFile OnChange="HandleFileSelected" class="form-control" accept=".jpg,.jpeg,.png,.pdf" />
+                            <small class="text-muted mt-1 d-block">Yüklediğiniz belge otomatik olarak sakinlere duyuru olarak gönderilecektir.</small>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(modalError))
+                    {
+                        <div class="alert alert-danger py-2 mt-3 small fw-bold"><i class="bi bi-exclamation-triangle me-1"></i>@modalError</div>
+                    }
+                </div>
+                <div class="modal-footer border-0">
+                    <button class="btn btn-light" @onclick="CloseModal">İptal</button>
+                    <button class="btn @(modalType == "Income" ? "btn-success" : "btn-danger") px-4 fw-bold" @onclick="SaveTransaction" disabled="@isSaving">
+                        @if (isSaving)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                    
+                            <span>İşleniyor...</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-check-lg me-1"></i>
+                    
+                            <span>Kaydet @(modalType == "Expense" ? "ve Duyur" : "")</span>
+                        }
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> authState { get; set; } = null!;
+
+    private int currentApartmentId;
+    private bool isLoading = true;
+    private List<BudgetTransaction> transactions = new();
+
+    private decimal totalIncome = 0;
+    private decimal totalExpense = 0;
+    private decimal currentBudget = 0;
+
+    // Modal değişkenleri
+    private bool showModal = false;
+    private string modalType = "Income";
+    private bool isSaving = false;
+    private string? modalError;
+    private BudgetTransaction newTransaction = new();
+    private IBrowserFile? selectedFile;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await authState;
+        var userIdClaim = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        if (int.TryParse(userIdClaim, out int userId))
+        {
+            using var aptCtx = await AptCtxFactory.CreateDbContextAsync();
+            var apt = await aptCtx.Apartments.FirstOrDefaultAsync(a => a.AdminUserId == userId);
+
+            if (apt != null)
+            {
+                currentApartmentId = apt.Id;
+                await LoadData();
+            }
+        }
+    }
+
+    private async Task LoadData()
+    {
+        isLoading = true;
+        using var ctx = await BudgetCtxFactory.CreateDbContextAsync();
+
+        transactions = await ctx.BudgetTransactions
+            .AsNoTracking()
+            .Where(x => x.ApartmentId == currentApartmentId)
+            .OrderByDescending(x => x.Date)
+            .ToListAsync();
+
+        totalIncome = transactions.Where(x => x.TransactionType == "Income").Sum(x => x.Amount);
+        totalExpense = transactions.Where(x => x.TransactionType == "Expense").Sum(x => x.Amount);
+        currentBudget = totalIncome - totalExpense;
+
+        isLoading = false;
+    }
+
+    private void OpenModal(string type)
+    {
+        modalType = type;
+        newTransaction = new BudgetTransaction { Amount = 0 };
+        selectedFile = null;
+        modalError = null;
+        showModal = true;
+    }
+
+    private void CloseModal() => showModal = false;
+
+    private void HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        selectedFile = e.File;
+    }
+
+    private async Task SaveTransaction()
+    {
+        if (newTransaction.Amount <= 0)
+        {
+            modalError = "Lütfen geçerli bir tutar girin.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(newTransaction.Description))
+        {
+            modalError = "Lütfen işlem için bir açıklama yazın.";
+            return;
+        }
+
+        try
+        {
+            isSaving = true;
+            modalError = null;
+
+            string? fileName = null;
+            if (modalType == "Expense" && selectedFile != null)
+            {
+                var folderPath = Path.Combine(Environment.WebRootPath, "uploads", "announcements");
+                if (!Directory.Exists(folderPath)) Directory.CreateDirectory(folderPath);
+
+                fileName = Guid.NewGuid().ToString() + Path.GetExtension(selectedFile.Name);
+                var filePath = Path.Combine(folderPath, fileName);
+
+                using var stream = selectedFile.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+                using var fileStream = new FileStream(filePath, FileMode.Create);
+                await stream.CopyToAsync(fileStream);
+            }
+
+            using var ctx = await BudgetCtxFactory.CreateDbContextAsync();
+            newTransaction.ApartmentId = currentApartmentId;
+            newTransaction.TransactionType = modalType;
+            newTransaction.Date = DateTime.UtcNow;
+            newTransaction.ReceiptUrl = fileName;
+
+            ctx.BudgetTransactions.Add(newTransaction);
+            await ctx.SaveChangesAsync();
+
+            // --- YENİ SADELEŞTİRİLMİŞ DUYURU BÖLÜMÜ ---
+            if (modalType == "Expense")
+            {
+                using var annCtx = await AnnCtxFactory.CreateDbContextAsync();
+                var newAnn = new Announcement
+                {
+                    ApartmentId = currentApartmentId,
+                    Title = "Yeni Harcama",
+                    Content = "Yeni bir harcama yapıldı. Apartman bütçesi sayfasından detayları ve faturayı takip edebilirsiniz.",
+                    AttachmentUrl = fileName,
+                    CreatedDate = DateTime.UtcNow
+                };
+                annCtx.Announcements.Add(newAnn);
+                await annCtx.SaveChangesAsync();
+            }
+            // --------------------------------------
+
+            showModal = false;
+            await LoadData();
+        }
+        catch (Exception ex)
+        {
+            modalError = "Kayıt sırasında hata oluştu: " + ex.Message;
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private async Task DeleteTransaction(int id)
+    {
+        try
+        {
+            using var ctx = await BudgetCtxFactory.CreateDbContextAsync();
+            var tr = await ctx.BudgetTransactions.FindAsync(id);
+            if (tr != null)
+            {
+                if (!string.IsNullOrEmpty(tr.ReceiptUrl))
+                {
+                    var filePath = Path.Combine(Environment.WebRootPath, "uploads", "announcements", tr.ReceiptUrl);
+                    if (File.Exists(filePath)) File.Delete(filePath);
+                }
+
+                ctx.BudgetTransactions.Remove(tr);
+                await ctx.SaveChangesAsync();
+                await LoadData();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Silme hatası: " + ex.Message);
+        }
+    }
+}

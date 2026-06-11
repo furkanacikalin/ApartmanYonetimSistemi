@@ -47,7 +47,7 @@
                                     {
                                         <span class="badge bg-light text-info border border-info me-2 d-flex align-items-center py-2 px-3">
                                             <i class="bi bi-clock-history me-2"></i>
-                                            @ann.UpdatedDate.Value.ToString("dd.MM.yyyy HH:mm")
+                                            @ann.UpdatedDate.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
                                         </span>
                                         <span class="badge rounded-pill bg-info text-dark shadow-sm" style="font-size: 0.75rem;">
                                             Güncellendi
@@ -57,7 +57,7 @@
                                     {
                                         <span class="badge bg-light text-primary border d-flex align-items-center py-2 px-3">
                                             <i class="bi bi-calendar3 me-2"></i>
-                                            @ann.CreatedDate.ToString("dd.MM.yyyy HH:mm")
+                                            @ann.CreatedDate.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
                                         </span>
                                     }
                                 </div>
@@ -65,9 +65,29 @@
 
                             <hr class="opacity-10" />
 
-                            <div class="announcement-content text-secondary lh-lg" style="white-space: pre-line;">
+                            <div class="announcement-content text-secondary lh-lg mb-3" style="white-space: pre-line;">
                                 @ann.Content
                             </div>
+
+                            @* --- DOSYA İNDİRME ALANI --- *@
+                            @if (!string.IsNullOrEmpty(ann.AttachmentUrl))
+                            {
+                                <div class="mt-3 p-3 bg-light rounded border border-light">
+                                    <div class="d-flex align-items-center justify-content-between">
+                                        <div class="d-flex align-items-center text-secondary">
+                                            <i class="bi bi-paperclip fs-4 me-2 text-primary"></i>
+                                            <span class="small fw-bold">Ekli Dosya Mevcut</span>
+                                        </div>
+                                        <a href="uploads/announcements/@ann.AttachmentUrl"
+                                           target="_blank"
+                                           download="@ann.AttachmentUrl"
+                                           class="btn btn-sm btn-outline-primary shadow-sm d-flex align-items-center">
+                                            <i class="bi bi-download me-2"></i> Görüntüle / İndir
+                                        </a>
+                                    </div>
+                                </div>
+                            }
+                            @* --------------------------- *@
                         </div>
                     </div>
                 }
@@ -87,13 +107,11 @@
 
         if (int.TryParse(userIdClaim, out int userId))
         {
-            
             using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
             var flat = await flatCtx.Flats.FirstOrDefaultAsync(f => f.ResidentUserId == userId);
 
             if (flat != null)
             {
-                
                 using var annCtx = await AnnCtxFactory.CreateDbContextAsync();
 
                 allAnnouncements = await annCtx.Announcements

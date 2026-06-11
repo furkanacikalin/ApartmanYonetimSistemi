@@ -2,7 +2,7 @@
 @using ApartmanYonetimSistemi.Data
 @using Microsoft.EntityFrameworkCore
 @implements IDisposable
-@inject ApartmentContext AptCtx
+@inject IDbContextFactory<ApartmentContext> DbFactory
 @inject NavigationManager NavManager
 @inject AuthenticationStateProvider AuthStateProvider
 
@@ -19,7 +19,6 @@
 <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
     <nav class="flex-column">
 
-        
         <div class="nav-item px-3">
             <NavLink class="nav-link d-flex align-items-center" href="" Match="NavLinkMatch.All" style="display: flex !important; align-items: center; gap: 12px;">
                 <i class="bi bi-house-door-fill" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
@@ -29,13 +28,19 @@
 
         <AuthorizeView>
             <Authorized>
-                
                 @if (context.User.IsInRole("Admin"))
                 {
                     <div class="nav-item px-3">
                         <NavLink class="nav-link" href="dashboard" style="display: flex !important; align-items: center; gap: 12px;">
                             <i class="bi bi-speedometer2" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
                             <span>Yönetici Paneli</span>
+                        </NavLink>
+                    </div>
+
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="admin/flat-inquiry" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-search" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Daire Sorgula</span>
                         </NavLink>
                     </div>
 
@@ -56,6 +61,20 @@
                         </NavLink>
                     </div>
 
+                    @* --- ADMİN ANKET YÖNETİMİ MENÜSÜ EKLENDİ --- *@
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="admin/surveys" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-bar-chart-line-fill" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Anket Yönetimi</span>
+                        </NavLink>
+                    </div>
+                    @* ------------------------------------------- *@
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="admin/budget" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-safe" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Harcama Yönetimi</span>
+                        </NavLink>
+                    </div>
                     <div class="nav-item px-3">
                         <NavLink class="nav-link" href="admin-requests" style="display: flex !important; align-items: center; gap: 12px;">
                             <i class="bi bi-clipboard-check-fill" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
@@ -76,9 +95,14 @@
                             <span>Ödeme Takibi</span>
                         </NavLink>
                     </div>
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="admin/profile" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-person-gear" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Profilim</span>
+                        </NavLink>
+                    </div>
                 }
 
-                
                 @if (context.User.IsInRole("Resident"))
                 {
                     <div class="nav-item px-3">
@@ -95,6 +119,15 @@
                         </NavLink>
                     </div>
 
+                    @* --- SAKİN ANKETLER MENÜSÜ EKLENDİ (Bir Sonraki Aşamada Sayfasını Yapacağız) --- *@
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="surveys" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-ui-radios" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Anketler</span>
+                        </NavLink>
+                    </div>
+                    @* ------------------------------------------------------------------------------- *@
+
                     <div class="nav-item px-3">
                         <NavLink class="nav-link" href="my-requests" style="display: flex !important; align-items: center; gap: 12px;">
                             <i class="bi bi-chat-left-text-fill" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
@@ -106,6 +139,18 @@
                         <NavLink class="nav-link" href="my-payments" style="display: flex !important; align-items: center; gap: 12px;">
                             <i class="bi bi-cash-stack" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
                             <span>Ödemelerim</span>
+                        </NavLink>
+                    </div>
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="resident-budget" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-safe" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Apartman Bütçesi</span>
+                        </NavLink>
+                    </div>
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="my-profile" style="display: flex !important; align-items: center; gap: 12px;">
+                            <i class="bi bi-person-gear" style="font-size: 1.2rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 24px;"></i>
+                            <span>Profilim</span>
                         </NavLink>
                     </div>
                 }
@@ -154,7 +199,8 @@
             var userIdClaim = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
             if (int.TryParse(userIdClaim, out int userId))
             {
-                hasApartment = await AptCtx.Apartments.AnyAsync(a => a.AdminUserId == userId);
+                using var context = await DbFactory.CreateDbContextAsync();
+                hasApartment = await context.Apartments.AnyAsync(a => a.AdminUserId == userId);
             }
         }
         else

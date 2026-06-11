@@ -1,0 +1,157 @@
+﻿@page "/resident-budget"
+@attribute [Authorize(Roles = "Resident")]
+@using ApartmanYonetimSistemi.Models
+@using ApartmanYonetimSistemi.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<BudgetContext> BudgetCtxFactory
+@inject IDbContextFactory<FlatContext> FlatCtxFactory
+
+<div class="container mt-4 mb-5">
+    <div class="d-flex align-items-center mb-4">
+        <h3 class="fw-bold mb-0"><i class="bi bi-safe text-primary me-2"></i>Apartman Bütçesi</h3>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary" role="status"></div></div>
+    }
+    else
+    {
+        <div class="row g-4 mb-4">
+            <div class="col-md-4">
+                <div class="card shadow-sm border-0 border-start border-success border-5 h-100 bg-white">
+                    <div class="card-body">
+                        <p class="text-muted text-uppercase small fw-bold mb-1">Toplam Kasa Girişi</p>
+                        <h3 class="text-success fw-bold mb-0">@totalIncome.ToString("C2")</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card shadow-sm border-0 border-start border-danger border-5 h-100 bg-white">
+                    <div class="card-body">
+                        <p class="text-muted text-uppercase small fw-bold mb-1">Toplam Harcama (Çıkış)</p>
+                        <h3 class="text-danger fw-bold mb-0">@totalExpense.ToString("C2")</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card shadow-sm border-0 bg-primary text-white h-100">
+                    <div class="card-body d-flex flex-column justify-content-center">
+                        <p class="text-white-50 text-uppercase small fw-bold mb-1">Mevcut Kasa (Net Bütçe)</p>
+                        <h2 class="text-white fw-bold mb-0">@currentBudget.ToString("C2")</h2>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm border-0 rounded-3 overflow-hidden">
+            <div class="card-header bg-white border-bottom py-3">
+                <h5 class="fw-bold mb-0 text-dark"><i class="bi bi-list-columns-reverse me-2"></i>Bütçe Hareketleri ve Faturalar</h5>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0 bg-white">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Tarih</th>
+                            <th>Tür</th>
+                            <th>Açıklama</th>
+                            <th>Belge/Fiş</th>
+                            <th class="text-end">Tutar</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (!transactions.Any())
+                        {
+                            <tr><td colspan="5" class="text-center py-4 text-muted">Henüz bütçe kaydı bulunmuyor.</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var tr in transactions)
+                            {
+                                <tr>
+                                    <td class="small">@tr.Date.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td>
+                                        @if (tr.TransactionType == "Income")
+                                        {
+                                            <span class="badge bg-success-subtle text-success border border-success">Gelir</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-danger-subtle text-danger border border-danger">Gider</span>
+                                        }
+                                    </td>
+                                    <td class="text-wrap" style="max-width: 300px;">@tr.Description</td>
+                                    <td>
+                                        @if (!string.IsNullOrEmpty(tr.ReceiptUrl))
+                                        {
+                                            <a href="uploads/announcements/@tr.ReceiptUrl" target="_blank" class="btn btn-sm btn-outline-secondary" title="Faturayı Görüntüle">
+                                                <i class="bi bi-file-earmark-text"></i> İncele
+                                            </a>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted small">-</span>
+                                        }
+                                    </td>
+                                    <td class="text-end fw-bold @(tr.TransactionType == "Income" ? "text-success" : "text-danger")">
+                                        @(tr.TransactionType == "Income" ? "+" : "-") @tr.Amount.ToString("C2")
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> authState { get; set; } = null!;
+
+    private int currentApartmentId;
+    private bool isLoading = true;
+    private List<BudgetTransaction> transactions = new();
+
+    private decimal totalIncome = 0;
+    private decimal totalExpense = 0;
+    private decimal currentBudget = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await authState;
+        var userIdClaim = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        if (int.TryParse(userIdClaim, out int userId))
+        {
+            using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+            var myFlat = await flatCtx.Flats.AsNoTracking().FirstOrDefaultAsync(f => f.ResidentUserId == userId);
+
+            if (myFlat != null)
+            {
+                currentApartmentId = myFlat.ApartmentId;
+                await LoadData();
+            }
+        }
+    }
+
+    private async Task LoadData()
+    {
+        isLoading = true;
+        using var ctx = await BudgetCtxFactory.CreateDbContextAsync();
+
+        transactions = await ctx.BudgetTransactions
+            .AsNoTracking()
+            .Where(x => x.ApartmentId == currentApartmentId)
+            .OrderByDescending(x => x.Date)
+            .ToListAsync();
+
+        totalIncome = transactions.Where(x => x.TransactionType == "Income").Sum(x => x.Amount);
+        totalExpense = transactions.Where(x => x.TransactionType == "Expense").Sum(x => x.Amount);
+        currentBudget = totalIncome - totalExpense;
+
+        isLoading = false;
+    }
+}

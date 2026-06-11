@@ -1,6 +1,7 @@
 ﻿@page "/create-apartment"
 @using ApartmanYonetimSistemi.Models
 @using ApartmanYonetimSistemi.Data
+@using ApartmanYonetimSistemi.Services
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.EntityFrameworkCore
@@ -8,43 +9,96 @@
 @inject IDbContextFactory<ApartmentContext> AptCtxFactory
 @inject IDbContextFactory<FlatContext> FlatCtxFactory
 @inject IDbContextFactory<UserContext> UserCtxFactory
+@inject AuthenticationStateProvider AuthProvider
 @inject NavigationManager NavManager
 
-<div class="row justify-content-center mt-5">
-    <div class="col-md-6 shadow-lg p-5 rounded bg-white border-start border-success border-5">
+<div class="row justify-content-center mt-5 mb-5">
+    <div class="col-lg-7 col-md-9 shadow-lg p-5 rounded bg-white border-start border-success border-5">
         <h2 class="mb-4 text-success fw-bold">Yeni Apartman Oluştur</h2>
-        <p class="text-muted">Sistemi kullanmaya başlamak için apartman bilgilerinizi kaydedin. Bu işlem sonucunda daireleriniz otomatik oluşturulacaktır.</p>
+        <p class="text-muted">Sistemi kullanmaya başlamak için apartman bilgilerinizi ve kendi yönetici profilinizi kaydedin. Bu işlem sonucunda daireleriniz otomatik oluşturulacaktır.</p>
 
-        <hr />
+        <hr class="mb-4" />
 
+        <h5 class="fw-bold text-dark mb-3"><i class="bi bi-building me-2 text-success"></i>1. Apartman Bilgileri</h5>
         <div class="mb-3">
-            <label class="fw-bold mb-1">Apartman Adı</label>
+            <label class="fw-bold mb-1 small">Apartman Adı</label>
             <input @bind="aptModel.Name" class="form-control form-control-lg" placeholder="Örn: Huzur Apartmanı" />
         </div>
 
         <div class="mb-3">
-            <label class="fw-bold mb-1">Adres</label>
+            <label class="fw-bold mb-1 small">Adres</label>
             <textarea @bind="aptModel.Address" class="form-control" rows="3" placeholder="Mahalle, Cadde, No..."></textarea>
         </div>
 
         <div class="mb-4">
-            <label class="fw-bold mb-1">Toplam Daire Sayısı</label>
+            <label class="fw-bold mb-1 small">Toplam Daire Sayısı</label>
             <div class="input-group">
                 <span class="input-group-text"><i class="bi bi-houses"></i></span>
-                <input @bind="totalFlats" type="number" class="form-control" min="1" max="100" />
+                <input @bind="totalFlats" type="number" class="form-control" min="1" max="500" />
             </div>
             <small class="text-muted">Girdiğiniz sayı kadar boş daire kaydı açılacaktır.</small>
         </div>
 
+        <hr class="my-4 opacity-25" />
+
+        <h5 class="fw-bold text-dark mb-3"><i class="bi bi-person-badge me-2 text-success"></i>2. Yönetici Profiliniz</h5>
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label class="fw-bold mb-1 small">Adınız</label>
+                <input type="text" class="form-control" @bind="adminFirstName" />
+            </div>
+            <div class="col-md-6 mb-3">
+                <label class="fw-bold mb-1 small">Soyadınız</label>
+                <input type="text" class="form-control" @bind="adminLastName" />
+            </div>
+        </div>
+        <div class="mb-4">
+            <label class="fw-bold mb-1 small">Yeni Kullanıcı Adınız</label>
+            <input type="text" class="form-control" @bind="adminUsername" />
+            <small class="text-warning fw-bold"><i class="bi bi-shield-lock me-1"></i> Varsayılan "admin" kullanıcı adınızı güvenliğiniz için değiştirin.</small>
+        </div>
+
+        <div class="card bg-light border-0 mb-4">
+            <div class="card-body">
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" role="switch" id="livesHereSwitch" @bind="livesInApartment" />
+                    <label class="form-check-label fw-bold" for="livesHereSwitch">Bu apartmanda oturuyorum</label>
+                </div>
+
+                @if (livesInApartment)
+                {
+                    <div class="mt-3">
+                        <label class="fw-bold mb-1 small text-success">Oturduğunuz Daire Numarası</label>
+                        <input type="number" class="form-control border-success" @bind="adminFlatNo" min="1" max="@totalFlats" />
+                        <small class="text-muted">Bu daire numarası profilinize tanımlanacak ve sistemde "Dolu" olarak görünecektir.</small>
+                    </div>
+                }
+                else
+                {
+                    <div class="mt-2 text-muted small">
+                        <i class="bi bi-info-circle me-1"></i> Dışarıdan bir yönetici olduğunuz için adınıza bir daire tanımlanmayacaktır.
+                    </div>
+                }
+            </div>
+        </div>
+
         @if (!string.IsNullOrEmpty(errorMsg))
         {
-            <div class="alert alert-danger py-2">
-                <i class="bi bi-exclamation-triangle"></i> @errorMsg
+            <div class="alert alert-danger py-2 shadow-sm">
+                <i class="bi bi-exclamation-triangle-fill me-1"></i> @errorMsg
             </div>
         }
 
-        <button class="btn btn-success btn-lg w-100 shadow-sm" @onclick="SaveApartment">
-            Sistemi Kur ve Yönetime Başla
+        <button class="btn btn-success btn-lg w-100 shadow-sm fw-bold" @onclick="SaveApartment" disabled="@isProcessing">
+            @if (isProcessing)
+            {
+                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                <span>Sistem Kuruluyor...</span>
+            }
+            else
+            {
+                <i class="bi bi-check2-circle me-2"></i> <span>Sistemi Kur ve Yönetime Başla</span>
+            }
         </button>
     </div>
 </div>
@@ -56,6 +110,16 @@
     private int totalFlats = 1;
     private string? errorMsg;
     private int currentUserId;
+    private bool isProcessing = false;
+
+    // Yönetici Bilgileri
+    private string adminFirstName = "";
+    private string adminLastName = "";
+    private string adminUsername = "";
+
+    // Oturma Durumu
+    private bool livesInApartment = true;
+    private int adminFlatNo = 1;
 
     protected override async Task OnInitializedAsync()
     {
@@ -69,13 +133,24 @@
             {
                 currentUserId = id;
 
-                
+                // Apartmanı var mı kontrolü
                 using var aptCtx = await AptCtxFactory.CreateDbContextAsync();
                 var hasApt = await aptCtx.Apartments.AnyAsync(a => a.AdminUserId == currentUserId);
 
                 if (hasApt)
                 {
                     NavManager.NavigateTo("/dashboard");
+                    return;
+                }
+
+                // Varsayılan kullanıcı bilgilerini çek
+                using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+                var currentUser = await userCtx.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == currentUserId);
+                if (currentUser != null)
+                {
+                    adminFirstName = currentUser.FirstName == "Sistem" ? "" : currentUser.FirstName;
+                    adminLastName = currentUser.LastName == "Yöneticisi" ? "" : currentUser.LastName;
+                    adminUsername = currentUser.Username == "admin" ? "" : currentUser.Username;
                 }
             }
         }
@@ -93,41 +168,93 @@
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(adminFirstName) || string.IsNullOrWhiteSpace(adminLastName) || string.IsNullOrWhiteSpace(adminUsername))
+        {
+            errorMsg = "Lütfen yönetici profil (Ad, Soyad, Kullanıcı Adı) bilgilerinizi eksiksiz doldurun.";
+            return;
+        }
+
+        if (livesInApartment && (adminFlatNo < 1 || adminFlatNo > totalFlats))
+        {
+            errorMsg = $"Oturduğunuz daire numarası 1 ile {totalFlats} arasında olmalıdır.";
+            return;
+        }
+
         try
         {
+            isProcessing = true;
+            errorMsg = null;
+
+            // 1. Yönetici Profilini Güncelle
+            using var userCtx = await UserCtxFactory.CreateDbContextAsync();
+            var adminUser = await userCtx.Users.FindAsync(currentUserId);
             
+            if (adminUser != null)
+            {
+                var isUsernameTaken = await userCtx.Users.AnyAsync(u => u.Username == adminUsername && u.Id != currentUserId);
+                if (isUsernameTaken)
+                {
+                    errorMsg = "Bu kullanıcı adı zaten kullanılıyor, lütfen başka bir tane seçin.";
+                    isProcessing = false;
+                    return;
+                }
+
+                adminUser.FirstName = adminFirstName;
+                adminUser.LastName = adminLastName;
+                adminUser.Username = adminUsername;
+                
+                if (adminUser.Role != "Admin")
+                {
+                    adminUser.Role = "Admin";
+                }
+                
+                await userCtx.SaveChangesAsync();
+
+                // Kullanıcı adı veya rol değiştiği için oturumu yenile
+                if (AuthProvider is CustomAuthStateProvider customAuthProvider)
+                {
+                    await customAuthProvider.UpdateAuthenticationState(new UserSession
+                    {
+                        Id = adminUser.Id,
+                        Username = adminUser.Username,
+                        Role = adminUser.Role
+                    });
+                }
+            }
+
+            // 2. Apartmanı Kaydet
             using var aptCtx = await AptCtxFactory.CreateDbContextAsync();
             aptModel.AdminUserId = currentUserId;
             aptCtx.Apartments.Add(aptModel);
             await aptCtx.SaveChangesAsync();
 
-           
+            // 3. Daireleri Otomatik Oluştur
             using var flatCtx = await FlatCtxFactory.CreateDbContextAsync();
+            var newFlats = new List<Flat>();
+
             for (int i = 1; i <= totalFlats; i++)
             {
-                flatCtx.Flats.Add(new Flat
+                newFlats.Add(new Flat
                 {
                     ApartmentId = aptModel.Id,
                     FlatNumber = i,
-                    ResidentUserId = null
+                    // Eğer yönetici apartmanda yaşıyorsa ve döngüdeki daire adminin dairesiyse eşleştir
+                    ResidentUserId = (livesInApartment && i == adminFlatNo) ? currentUserId : null
                 });
             }
+            
+            flatCtx.Flats.AddRange(newFlats);
             await flatCtx.SaveChangesAsync();
 
-            
-            using var userCtx = await UserCtxFactory.CreateDbContextAsync();
-            var user = await userCtx.Users.FindAsync(currentUserId);
-            if (user != null && user.Role != "Admin")
-            {
-                user.Role = "Admin";
-                await userCtx.SaveChangesAsync();
-            }
-
-            NavManager.NavigateTo("/dashboard");
+            NavManager.NavigateTo("/dashboard", forceLoad: true);
         }
         catch (Exception ex)
         {
-            errorMsg = "Veritabanı hatası: " + ex.Message;
+            errorMsg = "Sistem kurulum hatası: " + ex.Message;
+        }
+        finally
+        {
+            isProcessing = false;
         }
     }
 }

@@ -4,10 +4,13 @@
 @using ApartmanYonetimSistemi.Data
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.EntityFrameworkCore
+@using System.IO
 @inject IDbContextFactory<AnnouncementContext> AnnCtxFactory
 @inject IDbContextFactory<UserContext> UserCtxFactory
 @inject IDbContextFactory<ApartmentContext> AptCtxFactory
+@inject IWebHostEnvironment Environment
 
 <div class="container mt-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -32,9 +35,36 @@
                     <label class="form-label small fw-bold">İçerik</label>
                     <textarea @bind="currentAnn.Content" class="form-control" rows="4" placeholder="Duyuru detaylarını yazın..."></textarea>
                 </div>
+
+                @* --- DOSYA YÜKLEME ALANI --- *@
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Ek Dosya (PDF veya Görsel)</label>
+                    <InputFile OnChange="HandleFileSelected" class="form-control" accept=".pdf,.png,.jpg,.jpeg" />
+
+                    @if (!string.IsNullOrEmpty(currentAnn.AttachmentUrl))
+                    {
+                        <div class="form-text text-muted mt-2 d-flex align-items-center bg-light p-2 rounded">
+                            <i class="bi bi-paperclip text-primary me-2"></i>
+                            <span class="text-truncate" style="max-width: 300px;">Mevcut Dosya: @currentAnn.AttachmentUrl</span>
+                            <button type="button" class="btn btn-link btn-sm text-danger ms-auto p-0" @onclick="RemoveCurrentAttachment">
+                                <i class="bi bi-x-circle"></i> Eki Kaldır
+                            </button>
+                        </div>
+                    }
+
+                    @if (isUploading)
+                    {
+                        <div class="mt-2 text-primary small d-flex align-items-center">
+                            <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                            Dosya işleniyor, lütfen bekleyin...
+                        </div>
+                    }
+                </div>
+                @* --------------------------- *@
+
                 <div class="d-flex gap-2 justify-content-end">
-                    <button class="btn btn-light border" @onclick="() => showForm = false">İptal</button>
-                    <button class="btn btn-success px-4" @onclick="SaveAnnouncement">
+                    <button class="btn btn-light border" @onclick="CancelForm">İptal</button>
+                    <button class="btn btn-success px-4" @onclick="SaveAnnouncement" disabled="@isUploading">
                         <i class="bi bi-check-lg"></i> Kaydet
                     </button>
                 </div>
@@ -46,9 +76,9 @@
         <table class="table table-hover align-middle bg-white shadow-sm rounded overflow-hidden">
             <thead class="table-dark">
                 <tr>
-                    <th style="width: 25%">Tarih / Durum</th>
+                    <th style="width: 20%">Tarih / Durum</th>
                     <th style="width: 25%">Başlık</th>
-                    <th style="width: 35%">İçerik</th>
+                    <th style="width: 40%">İçerik</th>
                     <th style="width: 15%" class="text-end">İşlemler</th>
                 </tr>
             </thead>
@@ -71,7 +101,7 @@
                                         <div class="d-flex align-items-center">
                                             <span class="text-muted small">
                                                 <i class="bi bi-clock-history me-1"></i>
-                                                @ann.UpdatedDate.Value.ToString("dd.MM.yyyy HH:mm")
+                                                @ann.UpdatedDate.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
                                             </span>
                                             <span class="badge rounded-pill bg-info text-dark ms-2" style="font-size: 0.65rem;">
                                                 Güncellendi
@@ -82,15 +112,29 @@
                                     {
                                         <span class="text-muted small">
                                             <i class="bi bi-clock me-1"></i>
-                                            @ann.CreatedDate.ToString("dd.MM.yyyy HH:mm")
+                                            @ann.CreatedDate.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
                                         </span>
                                     }
                                 </div>
                             </td>
-                            <td class="fw-bold">@ann.Title</td>
-                            <td class="text-truncate" style="max-width: 250px;">@ann.Content</td>
+                            <td class="fw-bold">
+                                @ann.Title
+                                @if (!string.IsNullOrEmpty(ann.AttachmentUrl))
+                                {
+                                    <span class="badge bg-light text-primary border border-primary ms-1" title="Dosya Eki Mevcut">
+                                        <i class="bi bi-paperclip"></i> Ek var
+                                    </span>
+                                }
+                            </td>
+                            <td class="text-truncate" style="max-width: 350px;">@ann.Content</td>
                             <td class="text-end">
                                 <div class="btn-group btn-group-sm">
+                                    @if (!string.IsNullOrEmpty(ann.AttachmentUrl))
+                                    {
+                                        <a href="uploads/announcements/@ann.AttachmentUrl" target="_blank" class="btn btn-outline-secondary" title="Dosyayı Gör">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                    }
                                     <button class="btn btn-outline-primary" @onclick="() => EditAnnouncement(ann)" title="Düzenle">
                                         <i class="bi bi-pencil"></i>
                                     </button>
@@ -114,6 +158,10 @@
     private int editingId = 0;
     private int currentApartmentId;
 
+    // Dosya yükleme için gerekli değişkenler
+    private IBrowserFile? selectedFile;
+    private bool isUploading = false;
+
     [CascadingParameter] private Task<AuthenticationState> authState { get; set; } = null!;
 
     protected override async Task OnInitializedAsync()
@@ -123,9 +171,8 @@
 
         if (int.TryParse(userIdClaim, out int userId))
         {
-            
             using var aptCtx = await AptCtxFactory.CreateDbContextAsync();
-            var apt = await aptCtx.Apartments.FirstOrDefaultAsync(a => a.AdminUserId == userId);
+            var apt = await aptCtx.Apartments.AsNoTracking().FirstOrDefaultAsync(a => a.AdminUserId == userId);
 
             if (apt != null)
             {
@@ -137,10 +184,10 @@
 
     private async Task LoadAnnouncements()
     {
-        
         using var annCtx = await AnnCtxFactory.CreateDbContextAsync();
 
         announcements = await annCtx.Announcements
+            .AsNoTracking()
             .Where(a => a.ApartmentId == currentApartmentId)
             .OrderByDescending(a => a.UpdatedDate ?? a.CreatedDate)
             .ToListAsync();
@@ -148,8 +195,9 @@
 
     private void PrepareNewAnnouncement()
     {
-        currentAnn = new Announcement { ApartmentId = currentApartmentId, CreatedDate = DateTime.Now };
+        currentAnn = new Announcement { ApartmentId = currentApartmentId, CreatedDate = DateTime.UtcNow };
         editingId = 0;
+        selectedFile = null;
         showForm = true;
     }
 
@@ -162,36 +210,101 @@
             Content = ann.Content,
             ApartmentId = ann.ApartmentId,
             CreatedDate = ann.CreatedDate,
-            UpdatedDate = ann.UpdatedDate
+            UpdatedDate = ann.UpdatedDate,
+            AttachmentUrl = ann.AttachmentUrl
         };
         editingId = ann.Id;
+        selectedFile = null;
         showForm = true;
+    }
+
+    private void HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        selectedFile = e.File;
+    }
+
+    private void RemoveCurrentAttachment()
+    {
+        // Form üzerindeki ek dosya referansını kaldırır, fiziksel temizlik Save aşamasında yapılır
+        currentAnn.AttachmentUrl = null;
+        selectedFile = null;
+    }
+
+    private void CancelForm()
+    {
+        showForm = false;
+        selectedFile = null;
     }
 
     private async Task SaveAnnouncement()
     {
         if (string.IsNullOrWhiteSpace(currentAnn.Title) || string.IsNullOrWhiteSpace(currentAnn.Content)) return;
 
-        using var annCtx = await AnnCtxFactory.CreateDbContextAsync();
+        try
+        {
+            isUploading = true;
 
-        if (editingId == 0)
-        {
-            annCtx.Announcements.Add(currentAnn);
-        }
-        else
-        {
-            var existing = await annCtx.Announcements.FindAsync(editingId);
-            if (existing != null)
+            // Yeni bir dosya seçildiyse yükleme operasyonunu başlat
+            if (selectedFile != null)
             {
-                existing.Title = currentAnn.Title;
-                existing.Content = currentAnn.Content;
-                existing.UpdatedDate = DateTime.Now;
-            }
-        }
+                var folderPath = Path.Combine(Environment.WebRootPath, "uploads", "announcements");
+                if (!Directory.Exists(folderPath))
+                    Directory.CreateDirectory(folderPath);
 
-        await annCtx.SaveChangesAsync();
-        showForm = false;
-        await LoadAnnouncements();
+                var uniqueFileName = Guid.NewGuid().ToString() + Path.GetExtension(selectedFile.Name);
+                var filePath = Path.Combine(folderPath, uniqueFileName);
+
+                using var stream = selectedFile.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024); // Max 10MB
+                using var fileStream = new FileStream(filePath, FileMode.Create);
+                await stream.CopyToAsync(fileStream);
+
+                // Güncelleme modundaysak ve eski bir dosya varsa onu diskten sil
+                if (editingId != 0 && !string.IsNullOrEmpty(currentAnn.AttachmentUrl))
+                {
+                    DeletePhysicalFile(currentAnn.AttachmentUrl);
+                }
+
+                currentAnn.AttachmentUrl = uniqueFileName;
+            }
+
+            using var annCtx = await AnnCtxFactory.CreateDbContextAsync();
+
+            if (editingId == 0)
+            {
+                annCtx.Announcements.Add(currentAnn);
+            }
+            else
+            {
+                var existing = await annCtx.Announcements.FindAsync(editingId);
+                if (existing != null)
+                {
+                    existing.Title = currentAnn.Title;
+                    existing.Content = currentAnn.Content;
+
+                    // Eğer kullanıcı "Eki Kaldır" dediyse veya yeni dosya atandıysa güncelle
+                    if (existing.AttachmentUrl != currentAnn.AttachmentUrl && !string.IsNullOrEmpty(existing.AttachmentUrl) && selectedFile == null)
+                    {
+                        DeletePhysicalFile(existing.AttachmentUrl);
+                    }
+
+                    existing.AttachmentUrl = currentAnn.AttachmentUrl;
+                    existing.UpdatedDate = DateTime.UtcNow;
+                }
+            }
+
+            await annCtx.SaveChangesAsync();
+            showForm = false;
+            selectedFile = null;
+            await LoadAnnouncements();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Dosya yükleme veya kayıt hatası: {ex.Message}");
+        }
+        finally
+        {
+            isUploading = false;
+        }
     }
 
     private async Task DeleteAnnouncement(int id)
@@ -201,9 +314,31 @@
 
         if (ann != null)
         {
+            // Veritabanından silmeden önce diskteki fiziksel dosyasını temizle
+            if (!string.IsNullOrEmpty(ann.AttachmentUrl))
+            {
+                DeletePhysicalFile(ann.AttachmentUrl);
+            }
+
             annCtx.Announcements.Remove(ann);
             await annCtx.SaveChangesAsync();
             await LoadAnnouncements();
+        }
+    }
+
+    private void DeletePhysicalFile(string fileName)
+    {
+        try
+        {
+            var filePath = Path.Combine(Environment.WebRootPath, "uploads", "announcements", fileName);
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Fiziksel dosya silinemedi: {ex.Message}");
         }
     }
 }
